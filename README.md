@@ -47,7 +47,8 @@ configuration does not grant permission to automate access.
 
 ### Requirements
 
-- Docker Engine and the Docker Compose plugin
+- Docker Engine and Docker Compose (the `docker compose` plugin or standalone
+  `docker-compose`)
 - `curl` for optional API checks
 
 ### Configure secrets
@@ -70,25 +71,29 @@ independently generated random values. Keep `.env` private and never commit it.
 
 ### Start services and create the first account
 
-Start the database, apply migrations, and launch the web app:
+For Docker setup, a Python virtual environment on the host is not required.
+Build the application and migration images from the current project files, then
+start the services:
 
 ```bash
-docker compose up --build -d
+docker-compose build web migrate
+docker-compose up -d
 ```
 
-If `docker compose` is unavailable but `docker-compose` is installed, use
-`docker-compose` in place of `docker compose` in the commands below. For
-example:
+If your installation provides the Compose plugin instead of the standalone
+command, use `docker compose` in place of `docker-compose` in the commands
+below.
+
+Load the initial reference data:
 
 ```bash
-docker-compose up --build -d
+docker-compose run --rm web srm-seed-reference-data
 ```
 
-Load initial reference data and create an administrator:
+After seeding completes successfully, create an administrator:
 
 ```bash
-docker compose run --rm web srm-seed-reference-data
-docker compose exec web srm-create-admin
+docker-compose exec web srm-create-admin
 ```
 
 The administrator command prompts for a username and password. Use a password
@@ -137,12 +142,12 @@ endpoint remains administrator-only.
 Stop services while keeping the database volume:
 
 ```bash
-docker compose down
+docker-compose down
 ```
 
-Inspect service status and web logs with `docker compose ps` and
-`docker compose logs -f web`. To also delete the database volume and its data,
-run `docker compose down -v`.
+Inspect service status and web logs with `docker-compose ps` and
+`docker-compose logs -f web`. To also delete the database volume and its data,
+run `docker-compose down -v`.
 
 ## Local Python Development
 
@@ -177,7 +182,7 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 The app does not create or migrate tables at startup. For later Docker
-deployments, apply schema changes with `docker compose run --rm migrate`.
+deployments, apply schema changes with `docker-compose run --rm migrate`.
 
 For remote production access, put a TLS-terminating reverse proxy in front of
 the app. Set `PUBLIC_ORIGIN` to the HTTPS site origin,

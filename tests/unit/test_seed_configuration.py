@@ -12,9 +12,20 @@ from app.configuration.seeds import (
     load_seed_configuration,
     seed_reference_data,
 )
+from app.configuration.command import _default_seed_file
 from app.database.models import ApplicantOrigin, Provider
 
 ROOT = Path(__file__).parents[2]
+
+
+def test_default_seed_file_uses_working_directory(monkeypatch, tmp_path: Path) -> None:
+    """Installed commands use the seed copied into the container working dir."""
+    seed_file = tmp_path / "configs" / "seed.yaml"
+    seed_file.parent.mkdir()
+    seed_file.touch()
+    monkeypatch.chdir(tmp_path)
+
+    assert _default_seed_file() == seed_file
 
 
 def test_project_seed_contains_initial_origins_countries_and_manual_providers(
