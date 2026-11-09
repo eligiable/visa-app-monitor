@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "eligiable-visa-monitor"
+name = "visa-app-monitor"
 version = "0.1.0"
 description = "Compliant visa appointment monitoring and staff notification system"
 requires-python = ">=3.12"
@@ -20,9 +20,9 @@ dependencies = [
 ]
 
 [project.scripts]
-eligiable-create-admin = "app.auth.command:main"
-eligiable-seed-reference-data = "app.configuration.command:main"
-eligiable-monitor-worker = "app.monitoring.command:main"
+visa-app-monitor-create-admin = "app.auth.command:main"
+visa-app-monitor-seed-reference-data = "app.configuration.command:main"
+visa-app-monitor-worker = "app.monitoring.command:main"
 
 [project.optional-dependencies]
 dev = ["httpx>=0.27,<1.0", "pytest>=8.0,<9.0"]

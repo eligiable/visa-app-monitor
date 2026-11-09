@@ -1,0 +1,4 @@
+[console_scripts]
+visa-app-monitor-create-admin = app.auth.command:main
+visa-app-monitor-seed-reference-data = app.configuration.command:main
+visa-app-monitor-worker = app.monitoring.command:main

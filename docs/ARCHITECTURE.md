@@ -35,7 +35,7 @@ The architecture must permit individual components to be extracted into separate
 ## 2. Proposed Directory Structure
 
 ```text
-eligiable-Visa-Monitor/
+visa-app-monitor/
 │
 ├── app/
 │   ├── main.py
@@ -154,7 +154,7 @@ permission review, outbox delivery, and audit/error timelines.
 Runtime configuration records in the database are authoritative. Seed imports
 are validated, idempotent, and never overwrite existing records. Import the
 initial origins, destinations and manual-only provider records with
-`eligiable-seed-reference-data`; set `DATABASE_URL` and run Alembic migrations first.
+`visa-app-monitor-seed-reference-data`; set `DATABASE_URL` and run Alembic migrations first.
 
 ### Country
 

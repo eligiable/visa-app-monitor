@@ -56,7 +56,7 @@ configuration does not grant permission to automate access.
 From the project directory:
 
 ```bash
-cd ~/eligiable-visa-monitor
+cd ~/visa-app-monitor
 ```
 
 Copy the example environment file and generate unique secrets:
@@ -69,12 +69,13 @@ openssl rand -hex 32
 Edit `.env` and set `POSTGRES_PASSWORD` and `SESSION_SECURITY_KEY` to
 independently generated random values. Keep `.env` private and never commit it.
 
-The project branding, package name, and CLI commands use `eligiable`. When
+The project branding uses `eligiable`; the package name and CLI commands use
+`visa-app-monitor`. When
 upgrading an existing Docker deployment, keep its current `POSTGRES_DB` and
 `POSTGRES_USER` values in `.env` so the existing database volume remains
 accessible. Rebuild the images before using the renamed
-`eligiable-seed-reference-data`, `eligiable-create-admin`, and
-`eligiable-monitor-worker` commands.
+`visa-app-monitor-seed-reference-data`, `visa-app-monitor-create-admin`, and
+`visa-app-monitor-worker` commands.
 
 ### Start services and create the first account
 
@@ -94,14 +95,14 @@ below.
 Load the initial reference data:
 
 ```bash
-docker-compose run --rm web eligiable-seed-reference-data \
+docker-compose run --rm web visa-app-monitor-seed-reference-data \
   --file /app/configs/seed.yaml
 ```
 
 After seeding completes successfully, create an administrator:
 
 ```bash
-docker-compose exec web eligiable-create-admin
+docker-compose exec web visa-app-monitor-create-admin
 ```
 
 The administrator command prompts for a username and password. Use a password
@@ -230,8 +231,8 @@ the server:
 
 ```bash
 alembic upgrade head
-eligiable-seed-reference-data
-eligiable-create-admin
+visa-app-monitor-seed-reference-data
+visa-app-monitor-create-admin
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
@@ -303,7 +304,7 @@ release:
 Run the focused verification suite:
 
 ```bash
-cd ~/eligiable-visa-monitor && . .venv/bin/activate && pytest -q \
+cd ~/visa-app-monitor && . .venv/bin/activate && pytest -q \
   tests/unit/test_auth_api.py \
   tests/unit/test_availability_detection.py \
   tests/unit/test_notification_pipeline.py \

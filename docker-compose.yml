@@ -69,7 +69,7 @@ services:
 
   scheduler:
     build: .
-    command: ["eligiable-monitor-worker"]
+    command: ["visa-app-monitor-worker"]
     environment: *app_environment
     depends_on:
       migrate:

@@ -42,9 +42,9 @@ app/providers/adapters/vfs_global.py
 app/static/app.css
 app/static/app.js
 app/static/index.html
-eligiable_visa_monitor.egg-info/PKG-INFO
-eligiable_visa_monitor.egg-info/SOURCES.txt
-eligiable_visa_monitor.egg-info/dependency_links.txt
-eligiable_visa_monitor.egg-info/entry_points.txt
-eligiable_visa_monitor.egg-info/requires.txt
-eligiable_visa_monitor.egg-info/top_level.txt
+visa_app_monitor.egg-info/PKG-INFO
+visa_app_monitor.egg-info/SOURCES.txt
+visa_app_monitor.egg-info/dependency_links.txt
+visa_app_monitor.egg-info/entry_points.txt
+visa_app_monitor.egg-info/requires.txt
+visa_app_monitor.egg-info/top_level.txt
