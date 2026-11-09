@@ -1,5 +1,6 @@
-GitHub Copilot Instructions
-Project Context
+# GitHub Copilot Instructions
+
+## Project Context
 
 This repository contains the SRM Visa Appointment Monitoring System.
 
@@ -7,25 +8,26 @@ It is a Python-based visa appointment monitoring and notification platform.
 
 Read the following documentation before making substantial changes:
 
-README.md
-PROJECT_BRIEF.md
-ARCHITECTURE.md
-COMPLIANCE.md
-IMPLEMENTATION_PLAN.md
-AGENTS.md
-Coding Requirements
+- README.md
+- PROJECT_BRIEF.md
+- ARCHITECTURE.md
+- COMPLIANCE.md
+- IMPLEMENTATION_PLAN.md
+- AGENTS.md
+
+## Coding Requirements
 
 Use:
 
-Python.
-FastAPI.
-SQLAlchemy.
-PostgreSQL.
-Alembic.
-Pydantic.
-HTTPX.
-Pytest.
-Docker.
+- Python.
+- FastAPI.
+- SQLAlchemy.
+- PostgreSQL.
+- Alembic.
+- Pydantic.
+- HTTPX.
+- Pytest.
+- Docker.
 
 Use type annotations and clear function names.
 
@@ -33,28 +35,28 @@ Follow PEP 8.
 
 Keep components modular and independently testable.
 
-Architecture
+## Architecture
 
 Separate:
 
-API endpoints.
-Database models.
-Business services.
-Provider adapters.
-Monitoring scheduler.
-Notification services.
-Configuration.
-Security.
+- API endpoints.
+- Database models.
+- Business services.
+- Provider adapters.
+- Monitoring scheduler.
+- Notification services.
+- Configuration.
+- Security.
 
 Avoid putting business logic directly into API routes.
 
-Visa Provider Integrations
+## Visa Provider Integrations
 
 Implement separate adapters for:
 
-VFS Global.
-BLS International.
-TLScontact.
+- VFS Global.
+- BLS International.
+- TLScontact.
 
 Do not assume automated access is permitted.
 
@@ -62,21 +64,21 @@ Use manual-check fallback when provider access is restricted or permission is un
 
 Never fabricate official APIs.
 
-Compliance Restrictions
+## Compliance Restrictions
 
 Do not implement:
 
-CAPTCHA solving or bypass.
-Queue bypass.
-Session spoofing.
-IP rotation to evade restrictions.
-Unauthorized login automation.
-Anti-bot evasion.
-Unauthorized private endpoint access.
+- CAPTCHA solving or bypass.
+- Queue bypass.
+- Session spoofing.
+- IP rotation to evade restrictions.
+- Unauthorized login automation.
+- Anti-bot evasion.
+- Unauthorized private endpoint access.
 
 Respect provider terms, applicable robots.txt directives and rate limits.
 
-Availability Detection
+## Availability Detection
 
 Only verified AVAILABLE results can trigger appointment alerts.
 
@@ -84,18 +86,18 @@ Do not alert on UNKNOWN, SOURCE_ERROR or MANUAL_CHECK_REQUIRED.
 
 Implement transition-based alerting, deduplication and cooldown.
 
-Notifications
+## Notifications
 
 Support:
 
-Telegram Bot API.
-SMTP email.
+- Telegram Bot API.
+- SMTP email.
 
 Use environment variables for credentials.
 
 Record notification delivery results.
 
-Testing
+## Testing
 
 Use Pytest.
 
@@ -103,25 +105,26 @@ Mock external providers.
 
 Test:
 
-Provider adapters.
-Change detection.
-Deduplication.
-Cooldown.
-Notification delivery.
-Error handling.
-Manual-check fallback.
-API endpoints.
-Development Practices
+- Provider adapters.
+- Change detection.
+- Deduplication.
+- Cooldown.
+- Notification delivery.
+- Error handling.
+- Manual-check fallback.
+- API endpoints.
+
+## Development Practices
 
 Before editing:
 
-Inspect relevant existing files.
-Preserve working functionality.
-Follow the documented architecture.
-Make focused changes.
-Add tests.
-Run relevant tests.
-Explain significant changes.
+- Inspect relevant existing files.
+- Preserve working functionality.
+- Follow the documented architecture.
+- Make focused changes.
+- Add tests.
+- Run relevant tests.
+- Explain significant changes.
 
 Do not introduce unnecessary frameworks or dependencies.
 

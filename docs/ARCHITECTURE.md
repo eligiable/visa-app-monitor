@@ -1,5 +1,6 @@
-System Architecture
-1. Architecture Principles
+# System Architecture
+
+## 1. Architecture Principles
 
 Build a modular monolithic application initially.
 
@@ -19,20 +20,21 @@ introduce a message broker unless a measured requirement justifies it.
 
 Separate the following responsibilities:
 
-Web dashboard.
-Authentication.
-Configuration management.
-Monitoring scheduler.
-Provider adapters.
-Availability detection.
-Notification delivery.
-Database persistence.
-Health monitoring.
+- Web dashboard.
+- Authentication.
+- Configuration management.
+- Monitoring scheduler.
+- Provider adapters.
+- Availability detection.
+- Notification delivery.
+- Database persistence.
+- Health monitoring.
 
 The architecture must permit individual components to be extracted into separate services later.
 
-2. Proposed Directory Structure
-text
+## 2. Proposed Directory Structure
+
+```text
 SRM-Visa-Monitor/
 │
 ├── app/
@@ -129,8 +131,9 @@ SRM-Visa-Monitor/
 ├── IMPLEMENTATION_PLAN.md
 ├── AGENTS.md
 └── CLAUDE.md
+```
 
-3. Database Design
+## 3. Database Design
 
 Use SQLAlchemy models and Alembic migrations.
 
@@ -153,79 +156,84 @@ are validated, idempotent, and never overwrite existing records. Import the
 initial origins, destinations and manual-only provider records with
 `srm-seed-reference-data`; set `DATABASE_URL` and run Alembic migrations first.
 
-Country
+### Country
 
 Fields:
 
-id
-country_code
-name
-enabled
-ApplicantOrigin
+- `id`
+- `country_code`
+- `name`
+- `enabled`
+
+### ApplicantOrigin
 
 Fields:
 
-id
-code
-name
-enabled
-City
+- `id`
+- `code`
+- `name`
+- `enabled`
+
+### City
 
 Fields:
 
-id
-country_id
-name
-enabled
-VisaCentre
+- `id`
+- `country_id`
+- `name`
+- `enabled`
+
+### VisaCentre
 
 Fields:
 
-id
-city_id
-provider_id
-name
-official_url
-access_mode
-enabled
-VisaCategory
+- `id`
+- `city_id`
+- `provider_id`
+- `name`
+- `official_url`
+- `access_mode`
+- `enabled`
+
+### VisaCategory
 
 Fields:
 
-id
-name
-category_code
-description
-enabled
-Provider
+- `id`
+- `name`
+- `category_code`
+- `description`
+- `enabled`
+
+### Provider
 
 Fields:
 
-id
-name
-provider_code
-access_mode
-terms_url
-documentation_url
-health_status
+- `id`
+- `name`
+- `provider_code`
+- `access_mode`
+- `terms_url`
+- `documentation_url`
+- `health_status`
 
-ProviderPermissionRecord
+### ProviderPermissionRecord
 
 Fields:
 
-id
-provider_id
-official_source_url
-terms_url
-robots_txt_url
-api_documentation_url
-permitted_access_method
-request_limits
-verified_at
-review_due_at
-responsible_administrator_id
-approval_status
-evidence_reference
+- `id`
+- `provider_id`
+- `official_source_url`
+- `terms_url`
+- `robots_txt_url`
+- `api_documentation_url`
+- `permitted_access_method`
+- `request_limits`
+- `verified_at`
+- `review_due_at`
+- `responsible_administrator_id`
+- `approval_status`
+- `evidence_reference`
 
 An adapter may execute automated access only when a current, approved
 permission record exists and the provider and job are explicitly enabled for
@@ -235,29 +243,29 @@ An approved record requires a verification timestamp, review deadline and
 responsible administrator. Provider names and public visibility are not
 evidence of permission.
 
-Administrator
+### Administrator
 
 Fields:
 
-id
-username
-password_hash
-role
-enabled
-created_at
-last_login_at
+- `id`
+- `username`
+- `password_hash`
+- `role`
+- `enabled`
+- `created_at`
+- `last_login_at`
 
-Session
+### Session
 
 Fields:
 
-id
-administrator_id
-token_hash
-csrf_token_hash
-created_at
-expires_at
-revoked_at
+- `id`
+- `administrator_id`
+- `token_hash`
+- `csrf_token_hash`
+- `created_at`
+- `expires_at`
+- `revoked_at`
 
 Do not store raw passwords, session secrets or notification credentials in
 these records.
@@ -272,59 +280,61 @@ when Secure. The one-time administrator bootstrap accepts a password from a
 prompt or environment, never command-line arguments, and refuses to replace
 an existing account.
 
-AuthRateLimit
+### AuthRateLimit
 
 Fields:
 
-id
-key_hash
-window_started_at
-failure_count
-blocked_until
-created_at
-updated_at
-MonitoringJob
+- `id`
+- `key_hash`
+- `window_started_at`
+- `failure_count`
+- `blocked_until`
+- `created_at`
+- `updated_at`
+
+### MonitoringJob
 
 Fields:
 
-id
-origin_id
-destination_country_id
-city_id
-visa_centre_id
-category_id
-provider_id
-appointment_type
-official_source_url
-polling_interval
-jitter_seconds
-enabled
-access_mode
-execution_status
-availability_status
-initial_available_alert_policy
-next_check_at
-last_check_at
-lock_owner
-lock_expires_at
+- `id`
+- `origin_id`
+- `destination_country_id`
+- `city_id`
+- `visa_centre_id`
+- `category_id`
+- `provider_id`
+- `appointment_type`
+- `official_source_url`
+- `polling_interval`
+- `jitter_seconds`
+- `enabled`
+- `access_mode`
+- `execution_status`
+- `availability_status`
+- `initial_available_alert_policy`
+- `next_check_at`
+- `last_check_at`
+- `lock_owner`
+- `lock_expires_at`
 
 Access mode, execution status and appointment availability are separate
 dimensions. `MANUAL_CHECK_REQUIRED` is an access/workflow condition, not an
 appointment availability result.
-CheckResult
+
+### CheckResult
 
 Fields:
 
-id
-job_id
-provider_permission_record_id
-checked_at
-execution_status
-availability_status
-source_url
-response_code
-duration_ms
-error_message
+- `id`
+- `job_id`
+- `provider_permission_record_id`
+- `checked_at`
+- `execution_status`
+- `availability_status`
+- `source_url`
+- `response_code`
+- `duration_ms`
+- `error_message`
 
 An execution failure or restricted check cannot carry an availability status.
 Only successfully verified automated checks may establish automated
@@ -332,29 +342,29 @@ availability. Store safe diagnostics only. Do not retain raw provider
 responses, session cookies, passwords, tokens or unnecessary applicant data in
 check results or logs.
 
-AvailabilityHistory
+### AvailabilityHistory
 
 Fields:
 
-id
-job_id
-previous_status
-new_status
-detected_at
-source_check_result_id
-manual_verification_id
+- `id`
+- `job_id`
+- `previous_status`
+- `new_status`
+- `detected_at`
+- `source_check_result_id`
+- `manual_verification_id`
 
-ManualVerification
+### ManualVerification
 
 Fields:
 
-id
-job_id
-operator_administrator_id
-recorded_status
-verified_at
-official_source_url
-internal_notes
+- `id`
+- `job_id`
+- `operator_administrator_id`
+- `recorded_status`
+- `verified_at`
+- `official_source_url`
+- `internal_notes`
 
 Only authorized staff may create manual verification records. Keep them
 distinct from automated check results; any resulting internal notification
@@ -362,57 +372,57 @@ must be explicitly labeled as manually verified. A verification may record
 AVAILABLE or UNAVAILABLE only when directly confirmed on the official source;
 an inconclusive review creates no availability result or availability alert.
 
-AuditEvent
+### AuditEvent
 
 Fields:
 
-id
-administrator_id
-action
-entity_type
-entity_id
-occurred_at
-safe_metadata
+- `id`
+- `administrator_id`
+- `action`
+- `entity_type`
+- `entity_id`
+- `occurred_at`
+- `safe_metadata`
 
 Record administrative changes, provider permission and access-mode changes,
 manual verification, job changes, alert creation and compliance-related
 events. Do not put secrets or sensitive applicant data in audit metadata.
 
-AlertEvent
+### AlertEvent
 
 Fields:
 
-id
-job_id
-availability_history_id
-availability_status
-verification_source
-created_at
-deduplication_key
+- `id`
+- `job_id`
+- `availability_history_id`
+- `availability_status`
+- `verification_source`
+- `created_at`
+- `deduplication_key`
 
-NotificationOutboxItem
-
-Fields:
-
-id
-alert_event_id
-channel
-recipient_reference
-created_at
-next_attempt_at
-state
-
-NotificationDeliveryAttempt
+### NotificationOutboxItem
 
 Fields:
 
-id
-outbox_item_id
-attempt_number
-attempted_at
-delivery_status
-provider_message_reference
-safe_error_detail
+- `id`
+- `alert_event_id`
+- `channel`
+- `recipient_reference`
+- `created_at`
+- `next_attempt_at`
+- `state`
+
+### NotificationDeliveryAttempt
+
+Fields:
+
+- `id`
+- `outbox_item_id`
+- `attempt_number`
+- `attempted_at`
+- `delivery_status`
+- `provider_message_reference`
+- `safe_error_detail`
 
 Keep the logical alert separate from channel- and recipient-specific delivery
 attempts. Retries must be bounded and idempotent; record each attempt
@@ -425,18 +435,19 @@ The retention schedule must be approved before production. An approved
 permission record without a review deadline is rejected by a database
 constraint. Error messages and audit metadata must be sanitized before storage.
 
-SystemError
+### SystemError
 
 Fields:
 
-id
-component
-provider_id
-severity
-message
-occurred_at
-resolved_at
-4. Provider Adapter Interface
+- `id`
+- `component`
+- `provider_id`
+- `severity`
+- `message`
+- `occurred_at`
+- `resolved_at`
+
+## 4. Provider Adapter Interface
 
 All provider integrations must implement a common interface.
 
@@ -485,20 +496,19 @@ class BaseProvider(ABC):
     def get_access_mode(self) -> ProviderAccessMode: ...
 ```
 
-
 Use a standardized typed result with distinct fields for:
 
-execution status (for example, SUCCEEDED, SOURCE_ERROR, or
-SKIPPED_RESTRICTED);
-availability status (AVAILABLE, UNAVAILABLE, UNKNOWN, or not applicable);
-verification source (authorized automation for adapter results; staff manual
-verification is stored as a separate ManualVerification record);
-checked timestamp, official source URL, and safe diagnostic details.
+- Execution status (for example, `SUCCEEDED`, `SOURCE_ERROR`, or
+  `SKIPPED_RESTRICTED`).
+- Availability status (`AVAILABLE`, `UNAVAILABLE`, `UNKNOWN`, or not
+  applicable).
+- Verification source (authorized automation for adapter results; staff manual
+  verification is stored as a separate `ManualVerification` record).
+- Checked timestamp, official source URL, and safe diagnostic details.
 
 `MANUAL_CHECK_REQUIRED` is an access/workflow mode, not a check execution
 outcome or appointment availability. A restricted job is not executed and
 must not produce an automated availability result.
-
 
 The implementation must validate adapter results before storing or alerting.
 The initial VFS Global, BLS International and TLScontact adapters are
@@ -507,8 +517,9 @@ no live provider integration or HTTP client has been added. Provider-specific
 URLs, access modes, permission evidence and request limits remain database
 configuration; YAML remains seed-only.
 
-5. Monitoring Workflow
-text
+## 5. Monitoring Workflow
+
+```text
 Scheduler
    |
    v
@@ -540,108 +551,111 @@ UNAVAILABLE -> AVAILABLE?
                          |
                          v
                   Independent delivery attempts
+```
 
-6. Scheduling
+## 6. Scheduling
 
 Use a dedicated monitoring process with APScheduler or an equivalent
 scheduler.
 
 Requirements:
 
-Per-job scheduling.
-Minimum configurable polling interval.
-Randomized jitter.
-Persistent scheduling state.
-No overlapping checks for the same job.
-Database-backed job locks or expiring leases with owner identity.
-Bounded concurrency.
-Per-provider concurrency limits.
-Graceful shutdown.
-Recovery after process restart or expired worker lease.
-Scheduler heartbeat independent from the web process.
+- Per-job scheduling.
+- Minimum configurable polling interval.
+- Randomized jitter.
+- Persistent scheduling state.
+- No overlapping checks for the same job.
+- Database-backed job locks or expiring leases with owner identity.
+- Bounded concurrency.
+- Per-provider concurrency limits.
+- Graceful shutdown.
+- Recovery after process restart or expired worker lease.
+- Scheduler heartbeat independent from the web process.
 
 Polling defaults must be conservative and must never override provider restrictions.
 
-7. Change Detection
+## 7. Change Detection
 
 Implement a dedicated service.
 
 Pseudocode:
 
-python
+```python
 if result.is_verified_available:
     if previous_status == "UNAVAILABLE" or initial_available_alert_is_enabled(job):
         if not duplicate_alert_exists(job):
             create_alert(job)
-
+```
 
 Additional safeguards:
 
-UNKNOWN cannot trigger availability alerts.
-SOURCE_ERROR cannot trigger availability alerts.
-The MANUAL_CHECK_REQUIRED state itself cannot trigger an automated
-availability alert. A separate staff manual-verification event may create an
-internal notification only under the policy described above.
-DISABLED cannot trigger availability alerts.
-Deduplicate by job and availability transition.
-Apply cooldown.
-Persist alert state before delivery attempts.
-The default initial-AVAILABLE policy is disabled. If explicitly enabled by an
-administrator, it applies only to a verified AVAILABLE result. Staff may
-generate an internal notification from a manual verification only when
-configured; label it as manually verified, keep it separate from automated
-results, and do not notify applicants.
-8. Notification Architecture
+- UNKNOWN cannot trigger availability alerts.
+- SOURCE_ERROR cannot trigger availability alerts.
+- The MANUAL_CHECK_REQUIRED state itself cannot trigger an automated
+  availability alert. A separate staff manual-verification event may create an
+  internal notification only under the policy described above.
+- DISABLED cannot trigger availability alerts.
+- Deduplicate by job and availability transition.
+- Apply cooldown.
+- Persist alert state before delivery attempts.
+- The default initial-AVAILABLE policy is disabled. If explicitly enabled by an
+  administrator, it applies only to a verified AVAILABLE result. Staff may
+  generate an internal notification from a manual verification only when
+  configured; label it as manually verified, keep it separate from automated
+  results, and do not notify applicants.
+
+## 8. Notification Architecture
 
 Define a common notification interface.
 
-python
+```python
 class NotificationProvider:
 
     async def send(self, message, recipient):
         raise NotImplementedError
-
+```
 
 Implement:
 
-TelegramNotificationProvider
-EmailNotificationProvider
+- `TelegramNotificationProvider`
+- `EmailNotificationProvider`
 
-Use a notification outbox pattern so that temporary delivery failures do not lose alerts.
+Use a notification outbox pattern so that temporary delivery failures do not
+lose alerts.
 Store each channel/recipient delivery attempt independently from the logical
 alert event. Use bounded, idempotent retries and retain safe failure details.
 
-9. Dashboard
+## 9. Dashboard
 
 FastAPI with server-rendered HTML templates is sufficient for the initial version.
 
 Suggested pages:
 
-/login
-/dashboard
-/countries
-/origins
-/cities
-/centres
-/categories
-/providers
-/jobs
-/history
-/alerts
-/logs
-/settings
+- `/login`
+- `/dashboard`
+- `/countries`
+- `/origins`
+- `/cities`
+- `/centres`
+- `/categories`
+- `/providers`
+- `/jobs`
+- `/history`
+- `/alerts`
+- `/logs`
+- `/settings`
 
 Use authenticated routes and CSRF protection where applicable.
 
-10. Health Monitoring
+## 10. Health Monitoring
 
 Implement:
 
-text
+```text
 GET /health
 GET /health/live
 GET /health/ready
-
+```
 
 The readiness endpoint should verify essential dependencies.
 
@@ -651,11 +665,11 @@ System-health alerts should be distinguishable from appointment-availability ale
 Heartbeat monitoring and system-failure notifications must be independent of
 the application process whose failure they detect.
 
-11. Deployment Architecture
+## 11. Deployment Architecture
 
 Initial deployment:
 
-text
+```text
 Internet
    |
 HTTPS Reverse Proxy
@@ -665,6 +679,7 @@ HTTPS Reverse Proxy
    +---- Dedicated Monitoring Process (scheduler and job execution)
    |
    +---- PostgreSQL (runtime configuration, state, and worker leases)
+```
 
 The database-backed lease design must support multiple monitoring workers
 later without duplicate job execution. The initial release remains a
@@ -682,7 +697,7 @@ The initial deployment may run one scheduler instance. If additional scheduler
 instances or workers are run, database-backed leases must coordinate claims and
 prevent duplicate job execution.
 
-12. Configuration Strategy
+## 12. Configuration Strategy
 
 Keep configuration separate from application logic.
 
@@ -695,18 +710,19 @@ Secrets belong in environment variables or a cloud secret manager, not YAML.
 
 Validate configuration using Pydantic.
 
-Do not allow configuration files to override provider access restrictions or compliance safeguards.
+Do not allow configuration files to override provider access restrictions or
+compliance safeguards.
 
-13. Scalability
+## 13. Scalability
 
 Design for future improvements:
 
-Dedicated workers.
-Multiple application instances.
-Centralized logging.
-Metrics and dashboards.
-Managed PostgreSQL.
-External uptime monitoring.
+- Dedicated workers.
+- Multiple application instances.
+- Centralized logging.
+- Metrics and dashboards.
+- Managed PostgreSQL.
+- External uptime monitoring.
 
 Additional application instances, dedicated workers and managed PostgreSQL
 are future deployment options, not mandatory initial dependencies. The
