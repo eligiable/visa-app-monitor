@@ -102,6 +102,7 @@ tbody tr:hover { background: #fcfcfe; }
 .footer span { padding: 0 5px; }
 .dialog { width: min(94vw, 520px); max-height: 90vh; overflow-y: auto; padding: 0; border: 0; border-radius: 15px; box-shadow: 0 24px 80px #111a2e40; }
 #job-dialog { width: min(94vw, 620px); }
+#provider-review-dialog { width: min(94vw, 680px); }
 .dialog::backdrop { background: #10182a88; backdrop-filter: blur(2px); }
 .dialog form { padding: 24px; }
 .dialog .panel-heading { min-height: unset; margin: -2px 0 10px; padding: 0 0 16px; }
@@ -110,6 +111,28 @@ tbody tr:hover { background: #fcfcfe; }
 .checkbox-label { display: flex; align-items: center; gap: 9px; font-weight: 500; }
 .checkbox-label input { width: 16px; height: 16px; accent-color: var(--blue); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 22px; }
+.provider-guide { padding: 16px 20px; border-bottom: 1px solid var(--line); background: #f8fafc; color: #3a465e; font-size: 12px; line-height: 1.55; }
+.provider-guide strong { display: block; margin-bottom: 5px; font-size: 13px; }
+.provider-guide p { max-width: 1000px; margin: 0 0 5px; }
+.provider-guide p:last-child { margin-bottom: 0; color: var(--muted); }
+.provider-detail { margin: 18px 0; border: 1px solid var(--line); border-radius: 8px; background: white; }
+.provider-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 17px 20px; border-bottom: 1px solid var(--line); }
+.provider-detail-heading h2 { margin: 0; font-size: 16px; }
+.provider-detail-heading .eyebrow { margin-bottom: 4px; }
+.provider-detail-content { padding: 5px 20px 16px; }
+.provider-detail-list { display: grid; grid-template-columns: minmax(130px, .35fr) minmax(0, 1fr); margin: 0; }
+.provider-detail-list dt, .provider-detail-list dd { min-width: 0; margin: 0; padding: 10px 0; border-bottom: 1px solid #eff1f5; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.provider-detail-list dt { color: var(--muted); font-weight: 700; }
+.provider-detail-list dd { color: #3a465e; }
+.provider-detail-list a { color: var(--blue-dark); }
+.field-with-help { display: flex; align-items: center; gap: 7px; margin-top: 16px; }
+.field-with-help label { margin: 0; }
+.help-tip { display: inline-grid; width: 18px; height: 18px; flex: 0 0 18px; place-items: center; padding: 0; border: 1px solid #cdd5e2; border-radius: 50%; background: white; color: #52617a; font-size: 11px; font-weight: 800; }
+.help-tip:focus-visible { outline: 3px solid #4263eb40; outline-offset: 2px; }
+.provider-review-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 22px; }
+.provider-review-actions-right { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.button-danger { min-height: 40px; padding: 0 14px; border: 1px solid #f1c3c8; border-radius: 9px; background: #fff3f4; color: #a42e40; font-weight: 700; }
+.button-danger:hover { background: #ffe8eb; }
 
 @media (max-width: 980px) {
   .sidebar { width: 218px; }
@@ -145,4 +168,11 @@ tbody tr:hover { background: #fcfcfe; }
   .filter-label { margin-left: 0; }
   .panel-heading select { min-width: 125px; }
   .login-card { padding: 30px 25px; }
+  .provider-guide { padding: 14px; }
+  .provider-detail-heading { padding: 14px; }
+  .provider-detail-content { padding: 4px 14px 12px; }
+  .provider-detail-list { grid-template-columns: minmax(105px, .4fr) minmax(0, 1fr); }
+  .provider-review-actions { align-items: stretch; flex-direction: column-reverse; }
+  .provider-review-actions-right { justify-content: stretch; }
+  .provider-review-actions-right .button { flex: 1 1 auto; padding: 0 9px; font-size: 11px; }
 }

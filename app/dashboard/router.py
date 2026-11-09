@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
 from typing import Annotated
@@ -192,7 +192,7 @@ class MonitoringJobSummary(BaseModel):
 
 
 class ProviderSummary(BaseModel):
-    """Campaign summary for service health and permission review."""
+    """Provider status and its latest compliance review configuration."""
 
     id: int
     name: str
@@ -201,6 +201,76 @@ class ProviderSummary(BaseModel):
     health_status: str
     enabled: bool
     permission_status: str | None = None
+    terms_url: str | None = None
+    documentation_url: str | None = None
+    permission: "ProviderPermissionSummary | None" = None
+
+
+class ProviderPermissionSummary(BaseModel):
+    """Provider access documentation and review lifecycle details."""
+
+    id: int
+    official_source_url: str
+    terms_url: str | None = None
+    robots_txt_url: str | None = None
+    api_documentation_url: str | None = None
+    permitted_access_method: str
+    request_limits: dict[str, int] | None = None
+    verified_at: datetime | None = None
+    review_due_at: datetime | None = None
+    responsible_administrator_id: int | None = None
+    approval_status: str
+    evidence_reference: str | None = None
+    revoked_at: datetime | None = None
+
+
+class ProviderPermissionConfiguration(BaseModel):
+    """Editable compliance documentation for a seeded provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    official_source_url: str = Field(min_length=1, max_length=2048)
+    terms_url: str | None = Field(default=None, max_length=2048)
+    robots_txt_url: str | None = Field(default=None, max_length=2048)
+    api_documentation_url: str | None = Field(default=None, max_length=2048)
+    permitted_access_method: str = Field(min_length=1, max_length=500)
+    request_limits: dict[str, int] | None = Field(default=None, max_length=32)
+    evidence_reference: str | None = Field(default=None, max_length=2048)
+
+    @field_validator(
+        "official_source_url",
+        "terms_url",
+        "robots_txt_url",
+        "api_documentation_url",
+        "permitted_access_method",
+        "evidence_reference",
+        mode="before",
+    )
+    @classmethod
+    def strip_configuration_text(cls, value: object) -> object:
+        """Trim user-entered configuration strings and URLs."""
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("request_limits")
+    @classmethod
+    def validate_request_limits(
+        cls,
+        value: dict[str, int] | None,
+    ) -> dict[str, int] | None:
+        """Require readable limit names and positive integer limits."""
+        if value is not None and any(
+            not key.strip() or limit <= 0 for key, limit in value.items()
+        ):
+            raise ValueError("request limits must have names and positive values")
+        return value
+
+
+class ProviderPermissionApproval(BaseModel):
+    """Administrator review deadline for documented provider permission."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    review_due_at: datetime
 
 
 class AvailabilityHistorySummary(BaseModel):
@@ -279,6 +349,29 @@ def _job_summary(session: Session, job: MonitoringJob) -> MonitoringJobSummary:
         jitter_seconds=job.jitter_seconds,
         next_check_at=job.next_check_at,
         last_check_at=job.last_check_at,
+    )
+
+
+def _provider_permission_summary(
+    permission: ProviderPermissionRecord,
+    *,
+    approval_status: str | None = None,
+) -> ProviderPermissionSummary:
+    """Build the dashboard representation of a provider review record."""
+    return ProviderPermissionSummary(
+        id=permission.id,
+        official_source_url=permission.official_source_url,
+        terms_url=permission.terms_url,
+        robots_txt_url=permission.robots_txt_url,
+        api_documentation_url=permission.api_documentation_url,
+        permitted_access_method=permission.permitted_access_method,
+        request_limits=permission.request_limits,
+        verified_at=permission.verified_at,
+        review_due_at=permission.review_due_at,
+        responsible_administrator_id=permission.responsible_administrator_id,
+        approval_status=approval_status or permission.approval_status,
+        evidence_reference=permission.evidence_reference,
+        revoked_at=permission.revoked_at,
     )
 
 
@@ -669,9 +762,23 @@ def list_providers(session: DatabaseSession) -> list[ProviderSummary]:
         permission = (
             session.query(ProviderPermissionRecord)
             .filter(ProviderPermissionRecord.provider_id == provider.id)
-            .order_by(ProviderPermissionRecord.review_due_at.desc())
+            .order_by(
+                ProviderPermissionRecord.created_at.desc(),
+                ProviderPermissionRecord.id.desc(),
+            )
             .first()
         )
+        permission_status = permission.approval_status if permission else None
+        review_due_at = permission.review_due_at if permission else None
+        if review_due_at is not None and review_due_at.tzinfo is None:
+            review_due_at = review_due_at.replace(tzinfo=UTC)
+        if (
+            permission is not None
+            and permission.approval_status == "APPROVED"
+            and review_due_at is not None
+            and review_due_at <= utc_now()
+        ):
+            permission_status = "EXPIRED"
         results.append(
             ProviderSummary(
                 id=provider.id,
@@ -680,10 +787,224 @@ def list_providers(session: DatabaseSession) -> list[ProviderSummary]:
                 access_mode=provider.access_mode,
                 health_status=provider.health_status,
                 enabled=provider.enabled,
-                permission_status=permission.approval_status if permission else None,
+                permission_status=permission_status,
+                terms_url=provider.terms_url,
+                documentation_url=provider.documentation_url,
+                permission=(
+                    _provider_permission_summary(
+                        permission,
+                        approval_status=permission_status,
+                    )
+                    if permission
+                    else None
+                ),
             )
         )
     return results
+
+
+def _validate_permission_urls(payload: ProviderPermissionConfiguration) -> None:
+    """Require HTTPS for every supplied provider compliance URL."""
+    for field in (
+        "official_source_url",
+        "terms_url",
+        "robots_txt_url",
+        "api_documentation_url",
+    ):
+        value = getattr(payload, field)
+        if value is not None:
+            _require_https_url(value)
+
+
+@router.post(
+    "/providers/{provider_id}/permissions",
+    response_model=ProviderPermissionSummary,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_role("ADMIN")), Depends(require_csrf)],
+)
+def create_provider_permission(
+    provider_id: int,
+    payload: ProviderPermissionConfiguration,
+    session: DatabaseSession,
+    current: Annotated[
+        tuple[Administrator, AdministratorSession],
+        Depends(get_current_session),
+    ],
+) -> ProviderPermissionSummary:
+    """Add a pending compliance review for a seed-managed provider."""
+    provider = session.get(Provider, provider_id)
+    if provider is None:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    _validate_permission_urls(payload)
+    permission = ProviderPermissionRecord(
+        provider_id=provider.id,
+        **payload.model_dump(),
+        responsible_administrator_id=current[0].id,
+        approval_status="PENDING",
+    )
+    session.add(permission)
+    session.flush()
+    _record_management_audit(
+        session,
+        current[0],
+        action="provider_permission.created",
+        entity_type="provider_permission_record",
+        entity_id=permission.id,
+        safe_metadata={"provider_id": provider.id, "approval_status": "PENDING"},
+    )
+    session.commit()
+    return _provider_permission_summary(permission)
+
+
+@router.patch(
+    "/provider-permissions/{permission_id}",
+    response_model=ProviderPermissionSummary,
+    dependencies=[Depends(require_role("ADMIN")), Depends(require_csrf)],
+)
+def update_provider_permission(
+    permission_id: int,
+    payload: ProviderPermissionConfiguration,
+    session: DatabaseSession,
+    current: Annotated[
+        tuple[Administrator, AdministratorSession],
+        Depends(get_current_session),
+    ],
+) -> ProviderPermissionSummary:
+    """Edit review documentation; edits invalidate any previous approval."""
+    permission = session.get(ProviderPermissionRecord, permission_id)
+    if permission is None:
+        raise HTTPException(status_code=404, detail="Provider review not found")
+    if permission.approval_status == "REVOKED" or permission.revoked_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Revoked reviews are immutable; add a new review instead",
+        )
+    _validate_permission_urls(payload)
+    changes = payload.model_dump()
+    for field, value in changes.items():
+        setattr(permission, field, value)
+    permission.approval_status = "PENDING"
+    permission.verified_at = None
+    permission.review_due_at = None
+    permission.revoked_at = None
+    permission.responsible_administrator_id = current[0].id
+    _record_management_audit(
+        session,
+        current[0],
+        action="provider_permission.updated",
+        entity_type="provider_permission_record",
+        entity_id=permission.id,
+        safe_metadata={
+            "provider_id": permission.provider_id,
+            "changed_fields": sorted(changes),
+            "approval_status": "PENDING",
+        },
+    )
+    session.commit()
+    return _provider_permission_summary(permission)
+
+
+@router.post(
+    "/provider-permissions/{permission_id}/approve",
+    response_model=ProviderPermissionSummary,
+    dependencies=[Depends(require_role("ADMIN")), Depends(require_csrf)],
+)
+def approve_provider_permission(
+    permission_id: int,
+    payload: ProviderPermissionApproval,
+    session: DatabaseSession,
+    current: Annotated[
+        tuple[Administrator, AdministratorSession],
+        Depends(get_current_session),
+    ],
+) -> ProviderPermissionSummary:
+    """Approve complete permission documentation with a future review date."""
+    permission = session.get(ProviderPermissionRecord, permission_id)
+    if permission is None:
+        raise HTTPException(status_code=404, detail="Provider review not found")
+    if permission.approval_status == "REVOKED" or permission.revoked_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Revoked reviews cannot be re-approved; add a new review",
+        )
+    now = utc_now()
+    review_due_at = payload.review_due_at
+    if review_due_at.tzinfo is None or review_due_at.utcoffset() is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Review deadline must include a timezone",
+        )
+    if review_due_at <= now:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Review deadline must be in the future",
+        )
+    if (
+        not permission.terms_url
+        or not permission.request_limits
+        or not permission.evidence_reference
+        or not permission.evidence_reference.strip()
+        or not permission.permitted_access_method.strip()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Terms URL, request limits, permitted method, and evidence "
+                "reference are required before approval"
+            ),
+        )
+    _require_https_url(permission.terms_url)
+    permission.approval_status = "APPROVED"
+    permission.verified_at = now
+    permission.review_due_at = review_due_at
+    permission.responsible_administrator_id = current[0].id
+    permission.revoked_at = None
+    _record_management_audit(
+        session,
+        current[0],
+        action="provider_permission.approved",
+        entity_type="provider_permission_record",
+        entity_id=permission.id,
+        safe_metadata={"provider_id": permission.provider_id},
+    )
+    session.commit()
+    return _provider_permission_summary(permission)
+
+
+@router.post(
+    "/provider-permissions/{permission_id}/revoke",
+    response_model=ProviderPermissionSummary,
+    dependencies=[Depends(require_role("ADMIN")), Depends(require_csrf)],
+)
+def revoke_provider_permission(
+    permission_id: int,
+    session: DatabaseSession,
+    current: Annotated[
+        tuple[Administrator, AdministratorSession],
+        Depends(get_current_session),
+    ],
+) -> ProviderPermissionSummary:
+    """Revoke a review record without changing the seeded provider mode."""
+    permission = session.get(ProviderPermissionRecord, permission_id)
+    if permission is None:
+        raise HTTPException(status_code=404, detail="Provider review not found")
+    if permission.approval_status == "REVOKED" or permission.revoked_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Provider review is already revoked",
+        )
+    permission.approval_status = "REVOKED"
+    permission.revoked_at = utc_now()
+    _record_management_audit(
+        session,
+        current[0],
+        action="provider_permission.revoked",
+        entity_type="provider_permission_record",
+        entity_id=permission.id,
+        safe_metadata={"provider_id": permission.provider_id},
+    )
+    session.commit()
+    return _provider_permission_summary(permission)
 
 
 @router.get("/alerts", response_model=list[AlertSummary], dependencies=[Depends(require_dashboard_access)])

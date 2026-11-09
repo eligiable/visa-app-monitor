@@ -243,6 +243,15 @@ An approved record requires a verification timestamp, review deadline and
 responsible administrator. Provider names and public visibility are not
 evidence of permission.
 
+Administrators may create pending permission-review records for seeded
+providers, edit their documentation, approve complete reviews with a future
+deadline, and revoke them. Edits invalidate prior approval; revoked records
+remain immutable. Review endpoints are CSRF-protected and administrator-only,
+and audit records identify the action and provider without copying evidence or
+other sensitive values. The dashboard cannot create provider identities or
+change provider access modes. An approved permission record is only one part
+of the runtime gate and does not enable automation by itself.
+
 ### Administrator
 
 Fields:
@@ -384,9 +393,10 @@ Fields:
 - `occurred_at`
 - `safe_metadata`
 
-Record administrative changes, provider permission and access-mode changes,
-manual verification, job changes, alert creation and compliance-related
-events. Do not put secrets or sensitive applicant data in audit metadata.
+Record administrative changes, provider permission-review creation, edits,
+approval and revocation, provider access-mode changes, manual verification,
+job changes, alert creation and compliance-related events. Do not put secrets
+or sensitive applicant data in audit metadata.
 
 ### AlertEvent
 

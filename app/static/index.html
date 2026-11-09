@@ -95,7 +95,24 @@
             </div>
           </section>
 
-          <section id="section-providers" class="dashboard-section" hidden><div class="panel"><div class="panel-heading"><div><h2>Providers</h2><p class="muted">Provider health, access mode and permission review status</p></div></div><div id="providers-table" class="table-wrap"></div></div></section>
+          <section id="section-providers" class="dashboard-section" hidden>
+            <div class="panel">
+              <div class="panel-heading"><div><h2>Providers</h2><p class="muted">Access state, compliance documentation and review status</p></div></div>
+              <div class="provider-guide">
+                <strong>Configure a provider review</strong>
+                <p>Open a provider's details, add or edit its official-source documentation, then approve only after permission and request limits have been independently verified. Changes to a review return it to Pending.</p>
+                <p>Provider records and access modes are seed-managed. An approved review does not itself enable automation; the provider, centre, job and adapter must separately permit it.</p>
+              </div>
+              <div id="providers-table" class="table-wrap"></div>
+            </div>
+            <section id="provider-detail" class="provider-detail" hidden aria-live="polite">
+              <div class="provider-detail-heading">
+                <div><p class="eyebrow">Provider record</p><h2 id="provider-detail-title"></h2></div>
+                <button id="provider-detail-edit" class="button button-secondary" data-admin-only type="button">Edit review</button>
+              </div>
+              <div id="provider-detail-content" class="provider-detail-content"></div>
+            </section>
+          </section>
           <section id="section-alerts" class="dashboard-section" hidden><div class="panel"><div class="panel-heading"><div><h2>Availability alerts</h2><p class="muted">Verified availability events</p></div></div><div id="alerts-table" class="table-wrap"></div></div></section>
           <section id="section-notifications" class="dashboard-section" hidden><div class="panel"><div class="panel-heading"><div><h2>Notification deliveries</h2><p class="muted">Outbox state by channel and recipient</p></div></div><div id="notifications-table" class="table-wrap"></div></div></section>
           <section id="section-errors" class="dashboard-section" hidden><div class="panel"><div class="panel-heading"><div><h2>System errors</h2><p class="muted">Operational and delivery failures</p></div></div><div id="errors-table" class="table-wrap"></div></div></section>
@@ -174,6 +191,64 @@
         <p class="muted">New city, centre, and category names are added if they do not already exist. Job settings do not grant provider automation permission.</p>
         <p id="job-error" class="notice notice-error" role="alert" hidden></p>
         <div class="dialog-actions"><button class="button button-secondary" data-close-dialog="job-dialog" type="button">Cancel</button><button class="button button-primary" type="submit">Save job</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="provider-review-dialog" class="dialog provider-dialog">
+      <form id="provider-review-form">
+        <div class="panel-heading"><div><p class="eyebrow">Administrator action</p><h2 id="provider-review-title">Add provider review</h2></div><button class="icon-button" data-close-dialog="provider-review-dialog" type="button" aria-label="Close dialog">×</button></div>
+        <input id="provider-review-provider-id" type="hidden">
+        <input id="provider-review-id" type="hidden">
+        <p id="provider-review-status" class="muted"></p>
+        <div class="field-with-help">
+          <label for="provider-official-url">Official source URL</label>
+          <button class="help-tip" type="button" title="The exact official HTTPS origin and page the provider permission covers. Access is matched against this origin." aria-label="Official source URL help">?</button>
+        </div>
+        <input id="provider-official-url" type="url" required maxlength="2048" placeholder="https://official-provider.example/appointments">
+        <div class="field-with-help">
+          <label for="provider-terms-url">Terms of use URL</label>
+          <button class="help-tip" type="button" title="Link to the provider terms reviewed for this integration. Required before approval." aria-label="Terms of use URL help">?</button>
+        </div>
+        <input id="provider-terms-url" type="url" maxlength="2048" placeholder="https://official-provider.example/terms">
+        <div class="field-with-help">
+          <label for="provider-robots-url">robots.txt URL</label>
+          <button class="help-tip" type="button" title="The provider's robots.txt location, when applicable. It is not a substitute for authorization." aria-label="robots.txt URL help">?</button>
+        </div>
+        <input id="provider-robots-url" type="url" maxlength="2048" placeholder="https://official-provider.example/robots.txt">
+        <div class="field-with-help">
+          <label for="provider-api-docs-url">Official API documentation URL</label>
+          <button class="help-tip" type="button" title="Official documentation for an API or other provider-approved access method. Do not enter guessed or private endpoints." aria-label="API documentation help">?</button>
+        </div>
+        <input id="provider-api-docs-url" type="url" maxlength="2048" placeholder="https://official-provider.example/developers">
+        <div class="field-with-help">
+          <label for="provider-access-method">Permitted access method</label>
+          <button class="help-tip" type="button" title="Describe the method explicitly allowed by the provider. This record never overrides a manual-only provider or adapter." aria-label="Permitted access method help">?</button>
+        </div>
+        <input id="provider-access-method" required maxlength="500" placeholder="Official documented API, subject to stated limits">
+        <div class="field-with-help">
+          <label for="provider-request-limits">Request limits (JSON)</label>
+          <button class="help-tip" type="button" title="Record documented positive integer limits, for example {&quot;requests_per_day&quot;: 10}. Required before approval." aria-label="Request limits help">?</button>
+        </div>
+        <textarea id="provider-request-limits" rows="3" maxlength="2000" placeholder='{"requests_per_day": 10}'></textarea>
+        <div class="field-with-help">
+          <label for="provider-evidence-reference">Evidence reference</label>
+          <button class="help-tip" type="button" title="A durable internal reference to the authorization or review evidence. Do not paste credentials or secrets." aria-label="Evidence reference help">?</button>
+        </div>
+        <input id="provider-evidence-reference" maxlength="2048" placeholder="compliance/provider-review-2026-01">
+        <div class="field-with-help">
+          <label for="provider-review-due">Review due date</label>
+          <button class="help-tip" type="button" title="Set the next review deadline in your local time. Approval requires a future date." aria-label="Review due date help">?</button>
+        </div>
+        <input id="provider-review-due" type="datetime-local">
+        <p id="provider-review-error" class="notice notice-error" role="alert" hidden></p>
+        <div class="provider-review-actions">
+          <button id="provider-revoke-button" class="button button-danger" type="button" hidden>Revoke review</button>
+          <div class="provider-review-actions-right">
+            <button class="button button-secondary" data-close-dialog="provider-review-dialog" type="button">Cancel</button>
+            <button class="button button-secondary" id="provider-approve-button" type="button" hidden>Approve review</button>
+            <button class="button button-primary" type="submit">Save review</button>
+          </div>
+        </div>
       </form>
     </dialog>
   </body>

@@ -1,6 +1,6 @@
 """Dashboard API tests for the admin operational views."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -12,6 +12,7 @@ from app.database.models import (
     AlertEvent,
     Administrator,
     ApplicantOrigin,
+    AuditEvent,
     AvailabilityHistory,
     CheckResult,
     City,
@@ -399,3 +400,149 @@ def test_staff_cannot_create_or_update_monitoring_jobs(tmp_path) -> None:
 
     assert denied_create.status_code == 403
     assert denied_update.status_code == 403
+
+
+def test_admin_can_manage_provider_permission_reviews_without_changing_provider_mode(
+    tmp_path,
+) -> None:
+    """Provider reviews are editable while seeded access modes stay untouched."""
+    app = build_test_app(tmp_path)
+    with TestClient(app) as client:
+        provision_admin(app)
+        with app.state.session_factory.begin() as session:
+            provider = Provider(
+                provider_code="review_provider",
+                name="Review Provider",
+                access_mode="MANUAL_CHECK_REQUIRED",
+                health_status="UNKNOWN",
+            )
+            session.add(provider)
+            session.flush()
+            provider_id = provider.id
+
+        csrf_token = login(client).json()["csrf_token"]
+        headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf_token}
+        payload = {
+            "official_source_url": "https://provider.example/appointments",
+            "terms_url": "https://provider.example/terms",
+            "robots_txt_url": "https://provider.example/robots.txt",
+            "api_documentation_url": "https://provider.example/docs",
+            "permitted_access_method": "Official documented API",
+            "request_limits": {"requests_per_day": 10},
+            "evidence_reference": "compliance/review-2026-01",
+        }
+
+        created = client.post(
+            f"/api/admin/providers/{provider_id}/permissions",
+            json=payload,
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+        permission_id = created.json()["id"]
+        assert created.json()["approval_status"] == "PENDING"
+
+        updated_payload = {**payload, "permitted_access_method": "Official API v2"}
+        updated = client.patch(
+            f"/api/admin/provider-permissions/{permission_id}",
+            json=updated_payload,
+            headers=headers,
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["permitted_access_method"] == "Official API v2"
+        assert updated.json()["approval_status"] == "PENDING"
+
+        approved = client.post(
+            f"/api/admin/provider-permissions/{permission_id}/approve",
+            json={"review_due_at": (datetime.now(UTC) + timedelta(days=180)).isoformat()},
+            headers=headers,
+        )
+        assert approved.status_code == 200, approved.text
+        assert approved.json()["approval_status"] == "APPROVED"
+        assert approved.json()["responsible_administrator_id"] == 1
+
+        provider_view = client.get("/api/admin/providers").json()[0]
+        assert provider_view["access_mode"] == "MANUAL_CHECK_REQUIRED"
+        assert provider_view["permission_status"] == "APPROVED"
+        assert provider_view["permission"]["id"] == permission_id
+        assert provider_view["permission"]["request_limits"] == {"requests_per_day": 10}
+
+        edited_after_approval = client.patch(
+            f"/api/admin/provider-permissions/{permission_id}",
+            json={**updated_payload, "evidence_reference": "compliance/review-2026-02"},
+            headers=headers,
+        )
+        assert edited_after_approval.status_code == 200
+        assert edited_after_approval.json()["approval_status"] == "PENDING"
+        assert edited_after_approval.json()["verified_at"] is None
+
+        reapproved = client.post(
+            f"/api/admin/provider-permissions/{permission_id}/approve",
+            json={"review_due_at": (datetime.now(UTC) + timedelta(days=180)).isoformat()},
+            headers=headers,
+        )
+        assert reapproved.status_code == 200, reapproved.text
+        assert reapproved.json()["approval_status"] == "APPROVED"
+
+        revoked = client.post(
+            f"/api/admin/provider-permissions/{permission_id}/revoke",
+            headers=headers,
+        )
+        assert revoked.status_code == 200, revoked.text
+        assert revoked.json()["approval_status"] == "REVOKED"
+        assert revoked.json()["revoked_at"] is not None
+
+        with app.state.session_factory() as session:
+            stored_provider = session.get(Provider, provider_id)
+            actions = {
+                event.action
+                for event in session.query(AuditEvent).all()
+            }
+        assert stored_provider.access_mode == "MANUAL_CHECK_REQUIRED"
+        assert {
+            "provider_permission.created",
+            "provider_permission.updated",
+            "provider_permission.approved",
+            "provider_permission.revoked",
+        } <= actions
+
+
+def test_staff_cannot_manage_provider_permission_reviews(tmp_path) -> None:
+    """Only administrators may change provider compliance configuration."""
+    app = build_test_app(tmp_path)
+    with TestClient(app) as client:
+        Base.metadata.create_all(app.state.engine)
+        with app.state.session_factory.begin() as session:
+            session.add(
+                Administrator(
+                    username="staff",
+                    password_hash=hash_password("secure-staff-password"),
+                    role="STAFF",
+                    enabled=True,
+                )
+            )
+            provider = Provider(
+                provider_code="staff_provider",
+                name="Staff Provider",
+                access_mode="MANUAL_CHECK_REQUIRED",
+                health_status="UNKNOWN",
+            )
+            session.add(provider)
+            session.flush()
+            provider_id = provider.id
+
+        csrf_token = login(
+            client,
+            username="staff",
+            password="secure-staff-password",
+        ).json()["csrf_token"]
+        headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf_token}
+        denied = client.post(
+            f"/api/admin/providers/{provider_id}/permissions",
+            json={
+                "official_source_url": "https://provider.example/appointments",
+                "permitted_access_method": "Manual verification",
+            },
+            headers=headers,
+        )
+
+    assert denied.status_code == 403

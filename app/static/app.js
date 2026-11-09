@@ -7,7 +7,7 @@ const sections = ["overview", "jobs", "providers", "alerts", "notifications", "e
 const descriptions = {
   overview: "A live snapshot of monitoring and delivery activity.",
   jobs: "Availability, execution state and source for each configured job.",
-  providers: "Provider health, access mode and permission review status.",
+  providers: "Provider access state, compliance documentation and review status.",
   alerts: "Verified availability events and their provenance.",
   notifications: "Outbox state by channel and recipient.",
   errors: "Operational and delivery failures recorded by the system.",
@@ -15,6 +15,7 @@ const descriptions = {
 };
 let csrfToken = "";
 let currentUser = null;
+let selectedProvider = null;
 
 function showNotice(message, kind = "") {
   const notice = $("#dashboard-message");
@@ -204,14 +205,143 @@ function renderJobs(container, jobs, includeActions = true) {
 }
 
 function renderProviders(container, providers) {
-  makeTable(container, [
+  const columns = [
     { label: "Provider", key: "name" },
     { label: "Code", key: "provider_code" },
     statusColumn("health_status", "Health"),
     statusColumn("access_mode", "Access mode"),
     statusColumn("permission_status", "Permission"),
     { label: "Enabled", render: (provider) => provider.enabled ? "Yes" : "No" },
-  ], providers, "No providers are configured.");
+  ];
+  if (container.id === "providers-table") {
+    columns.push({
+      label: "Actions",
+      render: (provider) => {
+        const group = document.createElement("span");
+        const details = document.createElement("button");
+        details.className = "row-action";
+        details.type = "button";
+        details.textContent = "Details";
+        details.addEventListener("click", () => renderProviderDetails(provider));
+        group.append(details);
+        if (currentUser?.role === "ADMIN") {
+          const edit = document.createElement("button");
+          edit.className = "row-action";
+          edit.type = "button";
+          edit.textContent = provider.permission ? "Edit review" : "Add review";
+          edit.addEventListener("click", () => openProviderEditor(provider));
+          group.append(edit);
+        }
+        return group;
+      },
+    });
+  }
+  makeTable(container, columns, providers, "No providers are configured.");
+}
+
+function renderProviderDetails(provider) {
+  selectedProvider = provider;
+  const detail = $("#provider-detail");
+  $("#provider-detail-title").textContent = provider.name;
+  const content = $("#provider-detail-content");
+  content.replaceChildren();
+  const definitionList = document.createElement("dl");
+  definitionList.className = "provider-detail-list";
+
+  const addDetail = (label, value, isLink = false) => {
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    if (isLink && value) {
+      try {
+        const url = new URL(value);
+        if (url.protocol === "https:") {
+          const anchor = document.createElement("a");
+          anchor.href = url.href;
+          anchor.target = "_blank";
+          anchor.rel = "noopener noreferrer";
+          anchor.textContent = value;
+          description.append(anchor);
+        } else {
+          description.textContent = value;
+        }
+      } catch {
+        description.textContent = value;
+      }
+    } else {
+      description.textContent = value || "Not recorded";
+    }
+    definitionList.append(term, description);
+  };
+
+  addDetail("Provider code", provider.provider_code);
+  addDetail("Access mode", provider.access_mode);
+  addDetail("Health", provider.health_status);
+  addDetail("Provider terms", provider.terms_url, true);
+  addDetail("Provider documentation", provider.documentation_url, true);
+  if (provider.permission) {
+    const permission = provider.permission;
+    addDetail("Review status", permission.approval_status);
+    addDetail("Official source", permission.official_source_url, true);
+    addDetail("Terms reviewed", permission.terms_url, true);
+    addDetail("robots.txt", permission.robots_txt_url, true);
+    addDetail("API documentation", permission.api_documentation_url, true);
+    addDetail("Permitted access method", permission.permitted_access_method);
+    addDetail("Request limits", permission.request_limits ? JSON.stringify(permission.request_limits) : "Not recorded");
+    addDetail("Evidence reference", permission.evidence_reference);
+    addDetail("Verified at", formatDate(permission.verified_at));
+    addDetail("Review due", formatDate(permission.review_due_at));
+    addDetail("Responsible administrator", permission.responsible_administrator_id);
+    addDetail("Revoked at", formatDate(permission.revoked_at));
+  } else {
+    addDetail("Review status", "No compliance review recorded");
+  }
+  content.append(definitionList);
+  $("#provider-detail-edit").textContent = provider.permission ? "Edit review" : "Add review";
+  detail.hidden = false;
+}
+
+function toLocalDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 16);
+}
+
+function openProviderEditor(provider) {
+  selectedProvider = provider;
+  const permission = provider.permission;
+  const form = $("#provider-review-form");
+  form.reset();
+  $("#provider-review-provider-id").value = String(provider.id);
+  $("#provider-review-id").value = permission ? String(permission.id) : "";
+  $("#provider-review-title").textContent = permission ? `Edit ${provider.name} review` : `Add ${provider.name} review`;
+  $("#provider-review-status").textContent = permission
+    ? `Current review status: ${permission.approval_status}. Saving edits returns this review to Pending.`
+    : "New review records start as Pending and do not change provider access.";
+  $("#provider-official-url").value = permission?.official_source_url || "";
+  $("#provider-terms-url").value = permission?.terms_url || "";
+  $("#provider-robots-url").value = permission?.robots_txt_url || "";
+  $("#provider-api-docs-url").value = permission?.api_documentation_url || "";
+  $("#provider-access-method").value = permission?.permitted_access_method || "";
+  $("#provider-request-limits").value = permission?.request_limits
+    ? JSON.stringify(permission.request_limits, null, 2)
+    : "";
+  $("#provider-evidence-reference").value = permission?.evidence_reference || "";
+  $("#provider-review-due").value = toLocalDateTime(permission?.review_due_at);
+  $("#provider-review-error").hidden = true;
+  $("#provider-approve-button").hidden = !permission || permission.approval_status === "REVOKED";
+  $("#provider-revoke-button").hidden = !permission || permission.approval_status === "REVOKED";
+  $("#provider-review-dialog").showModal();
+}
+
+async function reloadProviders() {
+  const providers = await request("/api/admin/providers");
+  renderProviders($("#providers-table"), providers);
+  const updatedSelection = providers.find((provider) => provider.id === selectedProvider?.id);
+  if (updatedSelection) renderProviderDetails(updatedSelection);
 }
 
 async function loadJobs() {
@@ -238,7 +368,7 @@ async function loadSection(section) {
   try {
     if (section === "overview") await loadOverview();
     if (section === "jobs") await loadJobs();
-    if (section === "providers") renderProviders($("#providers-table"), await request("/api/admin/providers"));
+    if (section === "providers") await reloadProviders();
     if (section === "alerts") {
       const alerts = await request("/api/admin/alerts");
       makeTable($("#alerts-table"), [
@@ -380,6 +510,7 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
     dialog.close();
     if (dialog.id === "staff-dialog") $("#staff-form").reset();
     if (dialog.id === "job-dialog") $("#job-form").reset();
+    if (dialog.id === "provider-review-dialog") $("#provider-review-form").reset();
   });
 });
 
@@ -462,6 +593,95 @@ $("#staff-form").addEventListener("submit", async (event) => {
 });
 $("#staff-dialog").addEventListener("close", () => $("#staff-form").reset());
 $("#job-dialog").addEventListener("close", () => $("#job-form").reset());
+$("#provider-review-dialog").addEventListener("close", () => $("#provider-review-form").reset());
+
+$("#provider-detail-edit").addEventListener("click", () => {
+  if (selectedProvider && currentUser?.role === "ADMIN") openProviderEditor(selectedProvider);
+});
+
+function providerPermissionPayload() {
+  let requestLimits = null;
+  const rawLimits = $("#provider-request-limits").value.trim();
+  if (rawLimits) {
+    requestLimits = JSON.parse(rawLimits);
+    if (!requestLimits || Array.isArray(requestLimits) || typeof requestLimits !== "object") {
+      throw new Error("Request limits must be a JSON object.");
+    }
+  }
+  const optional = (selector) => $(selector).value.trim() || null;
+  return {
+    official_source_url: $("#provider-official-url").value.trim(),
+    terms_url: optional("#provider-terms-url"),
+    robots_txt_url: optional("#provider-robots-url"),
+    api_documentation_url: optional("#provider-api-docs-url"),
+    permitted_access_method: $("#provider-access-method").value.trim(),
+    request_limits: requestLimits,
+    evidence_reference: optional("#provider-evidence-reference"),
+  };
+}
+
+$("#provider-review-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = $("#provider-review-error");
+  error.hidden = true;
+  try {
+    const providerId = $("#provider-review-provider-id").value;
+    const permissionId = $("#provider-review-id").value;
+    const path = permissionId
+      ? `/api/admin/provider-permissions/${permissionId}`
+      : `/api/admin/providers/${providerId}/permissions`;
+    await request(path, {
+      method: permissionId ? "PATCH" : "POST",
+      body: JSON.stringify(providerPermissionPayload()),
+    });
+    $("#provider-review-dialog").close();
+    showNotice("Provider review saved. Its status is Pending until approved.");
+    await reloadProviders();
+  } catch (requestError) {
+    error.textContent = requestError instanceof SyntaxError
+      ? "Request limits must be valid JSON."
+      : requestError.message;
+    error.hidden = false;
+  }
+});
+
+$("#provider-approve-button").addEventListener("click", async () => {
+  const error = $("#provider-review-error");
+  error.hidden = true;
+  try {
+    const reviewDueAt = $("#provider-review-due").value;
+    if (!reviewDueAt) throw new Error("Choose a review due date before approval.");
+    const reviewDueDate = new Date(reviewDueAt);
+    if (Number.isNaN(reviewDueDate.getTime())) throw new Error("Enter a valid review due date.");
+    await request(`/api/admin/provider-permissions/${$("#provider-review-id").value}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ review_due_at: reviewDueDate.toISOString() }),
+    });
+    $("#provider-review-dialog").close();
+    showNotice("Provider review approved. Provider access mode remains unchanged.");
+    await reloadProviders();
+  } catch (requestError) {
+    error.textContent = requestError.message;
+    error.hidden = false;
+  }
+});
+
+$("#provider-revoke-button").addEventListener("click", async () => {
+  if (!window.confirm("Revoke this provider review? The change is recorded and cannot be undone.")) return;
+  const error = $("#provider-review-error");
+  error.hidden = true;
+  try {
+    await request(`/api/admin/provider-permissions/${$("#provider-review-id").value}/revoke`, {
+      method: "POST",
+    });
+    $("#provider-review-dialog").close();
+    showNotice("Provider review revoked.");
+    await reloadProviders();
+  } catch (requestError) {
+    error.textContent = requestError.message;
+    error.hidden = false;
+  }
+});
 
 $("#job-form").addEventListener("submit", async (event) => {
   event.preventDefault();

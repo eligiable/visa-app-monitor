@@ -70,6 +70,15 @@ Before enabling an adapter, administrators must document:
 
 If permission is unclear, the adapter must remain disabled or manual-only.
 
+Administrators can record review evidence in the dashboard for seed-managed
+providers. An approval requires the reviewed terms URL, documented permitted
+method, request limits, evidence reference, verification timestamp, reviewer,
+and a future review deadline. Editing a review returns it to pending, and
+revocation is recorded and irreversible. Dashboard approval records evidence;
+it does not grant access or change a provider, centre, job, or adapter mode.
+Provider authorization and permitted access must be verified independently
+before approval.
+
 ## 6. Robots.txt and Terms
 
 Respect robots.txt directives and applicable website terms.
@@ -142,7 +151,7 @@ Record:
 
 - Administrator-created staff accounts and monitoring-job configuration
   changes, without storing passwords or secrets in audit metadata.
-- Provider configuration changes.
+- Provider permission-review creation, edits, approval, and revocation.
 - Monitoring job changes.
 - Access-mode changes.
 - Manual status updates.
