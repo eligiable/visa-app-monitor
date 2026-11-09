@@ -1,5 +1,8 @@
 # Visa Appointment Monitoring System
 
+<img width="1901" height="908" alt="image" src="https://github.com/user-attachments/assets/360ce208-1a76-4462-9f30-7264d77758d0" />
+
+
 ## Overview
 
 A visa appointment availability monitoring and staff notification platform for
