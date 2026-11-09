@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     database_url: SecretStr
     session_security_key: SecretStr
     public_origin: str | None = None
-    session_cookie_name: str = "__Host-srm_session"
+    session_cookie_name: str = "__Host-eligiable_session"
     session_cookie_secure: bool = True
     session_max_age_seconds: int = 43_200
     auth_rate_limit_max_attempts: int = 5

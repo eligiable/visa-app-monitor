@@ -2,7 +2,7 @@
 
 ## 1. Mandatory Policy
 
-The SRM Visa Appointment Monitoring System must access appointment sources only through methods that are publicly permitted or expressly authorized by the provider.
+The eligiable Visa Appointment Monitoring System must access appointment sources only through methods that are publicly permitted or expressly authorized by the provider.
 
 This document overrides any conflicting implementation request.
 
@@ -101,7 +101,7 @@ It should include:
 - Application name.
 - Application version.
 - Responsible organization.
-- Contact address controlled by SRM.
+- Contact address controlled by eligiable.
 
 Do not disguise the application as a normal consumer browser.
 
@@ -140,6 +140,8 @@ A manual result must be distinguishable from an automatically verified result.
 
 Record:
 
+- Administrator-created staff accounts and monitoring-job configuration
+  changes, without storing passwords or secrets in audit metadata.
 - Provider configuration changes.
 - Monitoring job changes.
 - Access-mode changes.
@@ -182,3 +184,8 @@ When uncertain whether an operation is permitted, do not automate it.
 
 Display `MANUAL_CHECK_REQUIRED` and direct the operator to the official
 provider website.
+
+Administrative job creation or enablement is not provider authorization.
+Provider records remain manual-only unless a current, documented and approved
+permission record explicitly permits the adapter's access method. Account
+creation remains administrator-only; public staff registration is disabled.

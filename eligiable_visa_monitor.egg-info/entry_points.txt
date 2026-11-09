@@ -1,0 +1,4 @@
+[console_scripts]
+eligiable-create-admin = app.auth.command:main
+eligiable-monitor-worker = app.monitoring.command:main
+eligiable-seed-reference-data = app.configuration.command:main

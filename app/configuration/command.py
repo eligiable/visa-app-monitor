@@ -24,7 +24,7 @@ def _default_seed_file() -> Path:
 def main() -> None:
     """Validate and import missing seed records into DATABASE_URL."""
     parser = argparse.ArgumentParser(
-        description="Import initial SRM visa-monitor reference data.",
+        description="Import initial eligiable visa-monitor reference data.",
     )
     parser.add_argument(
         "--file",

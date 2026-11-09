@@ -43,7 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             logger.info("Web application stopped")
 
     application = FastAPI(
-        title="SRM Visa Appointment Monitoring System",
+        title="eligiable Visa Appointment Monitoring System",
         version="0.1.0",
         docs_url=None,
         redoc_url=None,

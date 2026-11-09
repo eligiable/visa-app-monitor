@@ -13,7 +13,7 @@ class NotificationTemplateRenderer:
         """Build a plain-text message for appointment availability alerts."""
         job = job or MonitoringJob()
         lines = [
-            "SRM Visa Appointment Alert",
+            "eligiable Visa Appointment Alert",
             "",
             f"Status: {alert.availability_status}",
             f"Job ID: {alert.job_id}",

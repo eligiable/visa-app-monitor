@@ -35,7 +35,7 @@ The architecture must permit individual components to be extracted into separate
 ## 2. Proposed Directory Structure
 
 ```text
-SRM-Visa-Monitor/
+eligiable-Visa-Monitor/
 │
 ├── app/
 │   ├── main.py
@@ -154,7 +154,7 @@ permission review, outbox delivery, and audit/error timelines.
 Runtime configuration records in the database are authoritative. Seed imports
 are validated, idempotent, and never overwrite existing records. Import the
 initial origins, destinations and manual-only provider records with
-`srm-seed-reference-data`; set `DATABASE_URL` and run Alembic migrations first.
+`eligiable-seed-reference-data`; set `DATABASE_URL` and run Alembic migrations first.
 
 ### Country
 
@@ -646,6 +646,25 @@ Suggested pages:
 - `/settings`
 
 Use authenticated routes and CSRF protection where applicable.
+
+### Implemented administration workflows
+
+Authenticated, CSRF-protected administrator endpoints and role-aware dashboard
+forms support:
+
+- Creating and listing `STAFF` accounts; public registration remains disabled.
+- Creating and updating monitoring jobs, including enable/pause state.
+- Validating selected reference records and city/country,
+  centre/provider, and official source URL relationships.
+- Running the scheduler as a dedicated Docker service, separate from the web
+  application, with the default manual-only provider registry.
+
+Staff may use operational views and record manual verifications, but cannot
+administer accounts or change job configuration. Provider records remain
+seeded; job creation does not change provider access modes or permission
+records. A job can be configured while its source is manual-only, but it does
+not make an automated provider request without the existing permission gate.
+Alerts, notification outbox items, and system errors remain system-generated.
 
 ## 10. Health Monitoring
 

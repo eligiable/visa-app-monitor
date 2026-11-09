@@ -32,10 +32,14 @@ class MonitoringWorker:
         """Request a graceful stop for the worker loop."""
         self._stopped = True
 
+    def _run_once_sync(self, now: datetime | None) -> list[Any]:
+        """Run one scheduler poll within a committed database transaction."""
+        with self.session_factory.begin() as session:
+            return self.engine.run_due_jobs(session, now=now)
+
     async def run_once(self, *, now: datetime | None = None) -> list[Any]:
         """Execute one scheduler poll and return the job cycle outputs."""
-        with self.session_factory() as session:
-            return self.engine.run_due_jobs(session, now=now)
+        return await asyncio.to_thread(self._run_once_sync, now)
 
     async def run_forever(self, *, max_cycles: int | None = None) -> list[Any]:
         """Poll until stop() is called or the maximum cycle count is reached."""
@@ -45,7 +49,8 @@ class MonitoringWorker:
             if max_cycles is not None and cycles >= max_cycles:
                 break
             poll_result = await self.run_once()
-            results.extend(poll_result)
+            if max_cycles is not None:
+                results.extend(poll_result)
             cycles += 1
             await asyncio.sleep(self.poll_interval_seconds)
         return results

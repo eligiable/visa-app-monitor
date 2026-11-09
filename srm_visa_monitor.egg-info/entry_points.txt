@@ -1,3 +1,0 @@
-[console_scripts]
-srm-create-admin = app.auth.command:main
-srm-seed-reference-data = app.configuration.command:main

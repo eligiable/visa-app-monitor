@@ -10,7 +10,7 @@ from app.auth.router import create_initial_administrator
 from app.auth.security import hash_password
 from app.config import Settings
 from app.database.base import Base
-from app.database.models import Administrator, AdministratorSession
+from app.database.models import Administrator, AdministratorSession, AuditEvent
 from app.main import create_app
 
 ORIGIN = "http://testserver"
@@ -22,7 +22,7 @@ def build_test_app(tmp_path, *, max_attempts: int = 5):
     settings = Settings(
         database_url=f"sqlite:///{database_path}",
         session_security_key="test-session-security-key-with-32-bytes-minimum",
-        session_cookie_name="srm_session",
+        session_cookie_name="eligiable_session",
         session_cookie_secure=False,
         auth_rate_limit_max_attempts=max_attempts,
         auth_rate_limit_window_seconds=60,
@@ -78,6 +78,8 @@ def test_browser_dashboard_and_assets_are_served_with_security_headers(tmp_path)
 
     assert page.status_code == stylesheet.status_code == script.status_code == 200
     assert "Sign in to view monitoring activity" in page.text
+    assert "Create staff account" in page.text
+    assert "Create monitoring job" in page.text
     assert "text/css" in stylesheet.headers["content-type"]
     assert "text/javascript" in script.headers["content-type"]
     assert "script-src 'self'" in page.headers["content-security-policy"]
@@ -93,7 +95,7 @@ def test_secure_login_session_csrf_logout_and_revocation(tmp_path) -> None:
         assert response.status_code == 200
         assert "session" not in response.json()
         csrf_token = response.json()["csrf_token"]
-        cookie = response.cookies.get("srm_session")
+        cookie = response.cookies.get("eligiable_session")
         assert cookie
         assert "httponly" in response.headers["set-cookie"].lower()
         assert "samesite=lax" in response.headers["set-cookie"].lower()
@@ -154,6 +156,87 @@ def test_authentication_requires_same_origin_for_login_and_logout(tmp_path) -> N
     assert successful_login.status_code == 200
     assert wrong_origin_csrf.status_code == 403
     assert wrong_origin_logout.status_code == 403
+
+
+def test_admin_can_create_staff_account_and_duplicate_names_are_rejected(tmp_path) -> None:
+    """Staff provisioning stores a password hash and records an audit event."""
+    app = build_test_app(tmp_path)
+    with TestClient(app) as client:
+        provision_admin(app)
+        csrf_token = login(client).json()["csrf_token"]
+        response = client.post(
+            "/api/admin/staff",
+            json={"username": " NewStaff ", "password": "secure-staff-password"},
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf_token},
+        )
+        duplicate = client.post(
+            "/api/admin/staff",
+            json={"username": "newstaff", "password": "another-secure-password"},
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf_token},
+        )
+        staff_list = client.get("/api/admin/staff")
+
+        assert response.status_code == 201
+        assert response.json()["username"] == "newstaff"
+        assert response.json()["role"] == "STAFF"
+        assert duplicate.status_code == 409
+        assert [item["username"] for item in staff_list.json()] == ["newstaff"]
+
+        with app.state.session_factory() as session:
+            account = session.scalar(
+                select(Administrator).where(Administrator.username == "newstaff")
+            )
+            audit = session.scalar(
+                select(AuditEvent).where(
+                    AuditEvent.action == "administrator.staff_account_created"
+                )
+            )
+            assert account is not None
+            assert account.password_hash != "secure-staff-password"
+            assert audit is not None
+            assert audit.safe_metadata == {"role": "STAFF"}
+
+
+def test_staff_cannot_create_staff_and_admin_write_requires_csrf(tmp_path) -> None:
+    """Only administrators with a session-bound CSRF token can provision staff."""
+    app = build_test_app(tmp_path)
+    with TestClient(app) as client:
+        Base.metadata.create_all(app.state.engine)
+        provision_admin(app)
+        with app.state.session_factory.begin() as session:
+            session.add(
+                Administrator(
+                    username="staff",
+                    password_hash=hash_password("secure-staff-password"),
+                    role="STAFF",
+                    enabled=True,
+                )
+            )
+        admin_csrf = login(client).json()["csrf_token"]
+        missing_csrf = client.post(
+            "/api/admin/staff",
+            json={"username": "newstaff", "password": "secure-staff-password"},
+            headers={"Origin": ORIGIN},
+        )
+        client.post("/api/auth/logout", headers={
+            "Origin": ORIGIN,
+            "X-CSRF-Token": admin_csrf,
+        })
+        staff_csrf = login(
+            client,
+            username="staff",
+            password="secure-staff-password",
+        ).json()["csrf_token"]
+        denied = client.post(
+            "/api/admin/staff",
+            json={"username": "newstaff", "password": "secure-staff-password"},
+            headers={"Origin": ORIGIN, "X-CSRF-Token": staff_csrf},
+        )
+        denied_list = client.get("/api/admin/staff")
+
+    assert missing_csrf.status_code == 403
+    assert denied.status_code == 403
+    assert denied_list.status_code == 403
 
 
 def test_role_authorization_denies_staff_from_admin_route(tmp_path) -> None:
@@ -275,7 +358,7 @@ def test_settings_reject_weak_key_and_insecure_cookie_name() -> None:
         Settings(
             database_url="sqlite://",
             session_security_key="test-session-security-key-with-32-bytes-minimum",
-            session_cookie_name="srm_session",
+            session_cookie_name="eligiable_session",
         )
     with pytest.raises(ValueError, match="HTTPS"):
         Settings(

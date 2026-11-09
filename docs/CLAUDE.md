@@ -1,10 +1,10 @@
-# CLAUDE.md — SRM Visa Monitoring System
+# CLAUDE.md — eligiable Visa Monitoring System
 
 ## Role
 
 Act as a senior Python full-stack engineer, software architect and DevOps engineer.
 
-You are developing the SRM Visa Appointment Monitoring System.
+You are developing the eligiable Visa Appointment Monitoring System.
 
 Your responsibilities include:
 
@@ -126,6 +126,20 @@ Create a professional business dashboard with:
 - Settings.
 
 Use clear status indicators and responsive layouts.
+
+## Management Workflows
+
+Administrator-only staff account creation and monitoring-job
+create/edit/enable/pause workflows are implemented. Keep public registration
+disabled, enforce role authorization and CSRF, hash passwords, validate job
+reference relationships, and audit administrative changes. Staff remain
+limited to operational viewing and manual verification.
+
+Do not treat job creation as permission to automate a provider. Provider
+records remain seed-managed and manual-only unless a separately reviewed
+permission record allows automation. Alerts, notifications and system errors
+are system-generated, not manually created in the dashboard. Run the scheduler
+in a dedicated deployment process, not in the web application.
 
 ## Quality Expectations
 

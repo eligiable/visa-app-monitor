@@ -72,7 +72,7 @@ class SMTPEmailProvider:
             raise ValueError("SMTP host and sender address must be configured")
 
         email = EmailMessage()
-        email["Subject"] = "SRM Visa Appointment Alert"
+        email["Subject"] = "eligiable Visa Appointment Alert"
         email["From"] = self.from_email
         email["To"] = recipient
         email.set_content(message)

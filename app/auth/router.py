@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import (
@@ -77,6 +78,24 @@ class StatusResponse(BaseModel):
     """Simple result for an authorized administration endpoint."""
 
     status: str
+
+
+class StaffCreateRequest(BaseModel):
+    """Credentials for an administrator-provisioned staff account."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=1, max_length=120)
+    password: str = Field(min_length=12, max_length=_MAX_PASSWORD_LENGTH)
+
+
+class StaffSummary(BaseModel):
+    """Non-sensitive account information for administrator management."""
+
+    username: str
+    role: str
+    enabled: bool
+    last_login_at: datetime | None = None
 
 
 def _rate_limit_key(request: Request, username: str) -> str:
@@ -295,6 +314,94 @@ def get_authenticated_administrator(
     return AdministratorResponse(
         username=current[0].username,
         role=current[0].role,
+    )
+
+
+@router.get(
+    "/admin/staff",
+    response_model=list[StaffSummary],
+    dependencies=[Depends(require_role("ADMIN"))],
+)
+def list_staff_accounts(session: DatabaseSession) -> list[StaffSummary]:
+    """List staff accounts without exposing password or session material."""
+    staff_accounts = session.scalars(
+        select(Administrator)
+        .where(Administrator.role == "STAFF")
+        .order_by(Administrator.username.asc())
+    ).all()
+    return [
+        StaffSummary(
+            username=account.username,
+            role=account.role,
+            enabled=account.enabled,
+            last_login_at=account.last_login_at,
+        )
+        for account in staff_accounts
+    ]
+
+
+@router.post(
+    "/admin/staff",
+    response_model=StaffSummary,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_role("ADMIN")), Depends(require_csrf)],
+)
+def create_staff_account(
+    payload: StaffCreateRequest,
+    session: DatabaseSession,
+    current: Annotated[
+        tuple[Administrator, AdministratorSession],
+        Depends(get_current_session),
+    ],
+) -> StaffSummary:
+    """Create a staff account with an Argon2id password hash and audit event."""
+    username = payload.username.strip().casefold()
+    if not username:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Username must not be blank",
+        )
+    existing = session.scalar(
+        select(Administrator.id).where(Administrator.username == username)
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with that username already exists",
+        )
+
+    account = Administrator(
+        username=username,
+        password_hash=hash_password(payload.password),
+        role="STAFF",
+        enabled=True,
+    )
+    session.add(account)
+    try:
+        session.flush()
+        session.add(
+            AuditEvent(
+                administrator_id=current[0].id,
+                action="administrator.staff_account_created",
+                entity_type="administrator",
+                entity_id=str(account.id),
+                occurred_at=utc_now(),
+                safe_metadata={"role": "STAFF"},
+            )
+        )
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with that username already exists",
+        ) from error
+
+    return StaffSummary(
+        username=account.username,
+        role=account.role,
+        enabled=account.enabled,
+        last_login_at=account.last_login_at,
     )
 
 

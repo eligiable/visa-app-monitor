@@ -3,7 +3,7 @@
 const $ = (selector) => document.querySelector(selector);
 const loginView = $("#login-view");
 const dashboardView = $("#dashboard-view");
-const sections = ["overview", "jobs", "providers", "alerts", "notifications", "errors"];
+const sections = ["overview", "jobs", "providers", "alerts", "notifications", "errors", "staff"];
 const descriptions = {
   overview: "A live snapshot of monitoring and delivery activity.",
   jobs: "Availability, execution state and source for each configured job.",
@@ -11,6 +11,7 @@ const descriptions = {
   alerts: "Verified availability events and their provenance.",
   notifications: "Outbox state by channel and recipient.",
   errors: "Operational and delivery failures recorded by the system.",
+  staff: "Staff accounts provisioned by administrators.",
 };
 let csrfToken = "";
 let currentUser = null;
@@ -118,6 +119,7 @@ function statusColumn(key, label = "Status") {
 
 function navigate(section) {
   if (!sections.includes(section)) return;
+  if (section === "staff" && currentUser?.role !== "ADMIN") return;
   document.querySelectorAll(".dashboard-section").forEach((element) => {
     element.hidden = element.id !== `section-${section}`;
   });
@@ -163,9 +165,10 @@ async function loadOverview() {
 
 function renderJobs(container, jobs, includeActions = true) {
   const columns = [
-    { label: "Job", render: (job) => `#${job.id} · ${job.appointment_type}` },
+    { label: "Job", render: (job) => `#${job.id} · ${job.city_name}, ${job.destination_country_name} · ${job.appointment_type}` },
     statusColumn("availability_status", "Availability"),
     statusColumn("execution_status", "Execution"),
+    statusColumn("access_mode", "Access mode"),
     { label: "Enabled", render: (job) => job.enabled ? "Yes" : "No" },
     { label: "Last checked", render: (job) => formatDate(job.last_check_at) },
   ];
@@ -185,6 +188,14 @@ function renderJobs(container, jobs, includeActions = true) {
         verify.textContent = "Verify";
         verify.addEventListener("click", () => openVerification(job));
         group.append(history, verify);
+        if (currentUser?.role === "ADMIN") {
+          const edit = document.createElement("button");
+          edit.className = "row-action";
+          edit.type = "button";
+          edit.textContent = "Edit";
+          edit.addEventListener("click", () => openJobEditor(job));
+          group.append(edit);
+        }
         return group;
       },
     });
@@ -210,8 +221,19 @@ async function loadJobs() {
   renderJobs($("#jobs-table"), jobs);
 }
 
+async function loadStaff() {
+  const staff = await request("/api/admin/staff");
+  makeTable($("#staff-table"), [
+    { label: "Username", key: "username" },
+    { label: "Role", key: "role" },
+    { label: "Status", render: (item) => item.enabled ? "Enabled" : "Disabled" },
+    { label: "Last sign in", render: (item) => formatDate(item.last_login_at) },
+  ], staff, "No staff accounts have been created.");
+}
+
 async function loadSection(section) {
-  if (!currentUser || currentUser.role !== "ADMIN") return;
+  if (!currentUser) return;
+  if (section === "staff" && currentUser.role !== "ADMIN") return;
   showNotice("");
   try {
     if (section === "overview") await loadOverview();
@@ -246,6 +268,7 @@ async function loadSection(section) {
         { label: "Occurred", render: (item) => formatDate(item.occurred_at) },
       ], errors);
     }
+    if (section === "staff") await loadStaff();
   } catch (error) {
     if (currentUser) showNotice(error.message, "notice-error");
   }
@@ -287,6 +310,9 @@ async function activateUser(user) {
   $("#account-username").textContent = user.username;
   $("#account-role").textContent = user.role;
   $("#account-avatar").textContent = user.username.slice(0, 1).toUpperCase();
+  document.querySelectorAll("[data-admin-only]").forEach((element) => {
+    element.hidden = user.role !== "ADMIN";
+  });
   loginView.hidden = true;
   dashboardView.hidden = false;
   await loadSection("overview");
@@ -348,6 +374,132 @@ $("#job-filter").addEventListener("change", loadJobs);
 $("#close-history").addEventListener("click", () => { $("#job-history-panel").hidden = true; });
 $("#close-dialog").addEventListener("click", () => $("#verification-dialog").close());
 $("#cancel-verification").addEventListener("click", () => $("#verification-dialog").close());
+document.querySelectorAll("[data-close-dialog]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const dialog = document.getElementById(button.dataset.closeDialog);
+    dialog.close();
+    if (dialog.id === "staff-dialog") $("#staff-form").reset();
+    if (dialog.id === "job-dialog") $("#job-form").reset();
+  });
+});
+
+function addSelectOptions(select, items, placeholder) {
+  select.replaceChildren(new Option(placeholder, ""));
+  for (const item of items) {
+    select.add(new Option(`${item.name}${item.code ? ` (${item.code})` : ""}`, item.id));
+  }
+}
+
+async function openJobEditor(job = null) {
+  const form = $("#job-form");
+  const creating = job === null;
+  form.reset();
+  $("#job-dialog-title").textContent = creating ? "Create monitoring job" : `Edit job #${job.id}`;
+  $("#job-id").value = creating ? "" : String(job.id);
+  $("#job-error").hidden = true;
+  $("#job-create-fields").hidden = !creating;
+  $("#job-create-fields").querySelectorAll("input, select").forEach((field) => {
+    field.disabled = !creating;
+  });
+  if (creating) {
+    try {
+      const options = await request("/api/admin/job-options");
+      addSelectOptions($("#job-origin"), options.origins, "Select applicant origin");
+      addSelectOptions($("#job-country"), options.countries, "Select destination country");
+      addSelectOptions($("#job-provider"), options.providers, "Select provider");
+      $("#job-appointment-type").value = "";
+      $("#job-source-url").value = "";
+      $("#job-polling-interval").value = "3600";
+      $("#job-jitter").value = "30";
+      $("#job-enabled").checked = false;
+    } catch (error) {
+      showNotice(error.message, "notice-error");
+      return;
+    }
+  } else {
+    $("#job-appointment-type").value = job.appointment_type;
+    $("#job-source-url").value = job.official_source_url;
+    $("#job-polling-interval").value = String(job.polling_interval);
+    $("#job-jitter").value = String(job.jitter_seconds);
+    $("#job-enabled").checked = job.enabled;
+  }
+  form.dataset.creating = String(creating);
+  $("#job-dialog").showModal();
+}
+
+$("#create-job-button").addEventListener("click", () => openJobEditor());
+$("#create-staff-button").addEventListener("click", () => {
+  $("#staff-form").reset();
+  $("#staff-error").hidden = true;
+  $("#staff-dialog").showModal();
+});
+
+$("#staff-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = $("#staff-error");
+  error.hidden = true;
+  const password = $("#staff-password").value;
+  if (password !== $("#staff-password-confirm").value) {
+    error.textContent = "The passwords do not match.";
+    error.hidden = false;
+    return;
+  }
+  try {
+    await request("/api/admin/staff", {
+      method: "POST",
+      body: JSON.stringify({
+        username: $("#staff-username").value,
+        password,
+      }),
+    });
+    $("#staff-dialog").close();
+    showNotice("Staff account created.");
+    await loadStaff();
+  } catch (requestError) {
+    error.textContent = requestError.message;
+    error.hidden = false;
+  }
+});
+$("#staff-dialog").addEventListener("close", () => $("#staff-form").reset());
+$("#job-dialog").addEventListener("close", () => $("#job-form").reset());
+
+$("#job-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = $("#job-error");
+  error.hidden = true;
+  const creating = $("#job-form").dataset.creating === "true";
+  const payload = {
+    appointment_type: $("#job-appointment-type").value,
+    official_source_url: $("#job-source-url").value,
+    polling_interval: Number($("#job-polling-interval").value),
+    jitter_seconds: Number($("#job-jitter").value),
+    enabled: $("#job-enabled").checked,
+  };
+  if (creating) {
+    Object.assign(payload, {
+      origin_id: Number($("#job-origin").value),
+      destination_country_id: Number($("#job-country").value),
+      provider_id: Number($("#job-provider").value),
+      city_name: $("#job-city").value,
+      visa_centre_name: $("#job-centre").value,
+      category_name: $("#job-category").value,
+      category_code: $("#job-category-code").value,
+    });
+  }
+  try {
+    const url = creating ? "/api/admin/jobs" : `/api/admin/jobs/${$("#job-id").value}`;
+    await request(url, {
+      method: creating ? "POST" : "PATCH",
+      body: JSON.stringify(payload),
+    });
+    $("#job-dialog").close();
+    showNotice(creating ? "Monitoring job created." : "Monitoring job updated.");
+    await loadJobs();
+  } catch (requestError) {
+    error.textContent = requestError.message;
+    error.hidden = false;
+  }
+});
 
 $("#verification-form").addEventListener("submit", async (event) => {
   event.preventDefault();

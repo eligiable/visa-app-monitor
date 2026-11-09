@@ -130,7 +130,7 @@ class NotificationOutboxService:
                 job = session.get(MonitoringJob, alert.job_id) if alert else None
                 message = (
                     NotificationTemplateRenderer.render_alert_message(alert, job)
-                    if alert else "SRM Visa notification"
+                    if alert else "eligiable Visa notification"
                 )
                 provider_ref = provider.send(message=message, recipient=item.recipient_reference)
                 attempt.delivery_status = "SUCCEEDED"

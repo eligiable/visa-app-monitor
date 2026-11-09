@@ -35,7 +35,7 @@ def build_test_app(tmp_path):
     settings = Settings(
         database_url=f"sqlite:///{database_path}",
         session_security_key="test-session-security-key-with-32-bytes-minimum",
-        session_cookie_name="srm_session",
+        session_cookie_name="eligiable_session",
         session_cookie_secure=False,
     )
     return create_app(settings)
@@ -272,3 +272,130 @@ def test_staff_can_sign_in_and_use_dashboard_and_manual_verification(tmp_path) -
 
         assert manual.status_code == 200
         assert manual.json()["new_status"] == "AVAILABLE"
+
+
+def test_admin_can_create_update_and_duplicate_check_monitoring_jobs(tmp_path) -> None:
+    """Job management validates references and cannot weaken manual-only access."""
+    app = build_test_app(tmp_path)
+    with TestClient(app) as client:
+        provision_admin(app)
+        create_job_record(app)
+        with app.state.session_factory.begin() as session:
+            origin = session.query(ApplicantOrigin).filter_by(code="PK").one()
+            country = session.query(Country).filter_by(country_code="DE").one()
+            provider = Provider(
+                provider_code="manual_provider",
+                name="Manual provider",
+                access_mode="MANUAL_CHECK_REQUIRED",
+                health_status="UNKNOWN",
+            )
+            session.add(provider)
+            session.flush()
+            provider_id = provider.id
+            origin_id = origin.id
+            country_id = country.id
+
+        csrf_token = login(client).json()["csrf_token"]
+        options = client.get("/api/admin/job-options")
+        assert options.status_code == 200
+        assert any(
+            item["provider_code"] == "manual_provider"
+            for item in options.json()["providers"]
+        )
+
+        payload = {
+            "origin_id": origin_id,
+            "destination_country_id": country_id,
+            "provider_id": provider_id,
+            "city_name": "Toronto",
+            "visa_centre_name": "Toronto Centre",
+            "category_name": "Business",
+            "category_code": "business",
+            "appointment_type": "Short Stay",
+            "official_source_url": "https://manual.example/appointments",
+            "polling_interval": 3600,
+            "jitter_seconds": 30,
+            "enabled": False,
+        }
+        headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf_token}
+        created = client.post("/api/admin/jobs", json=payload, headers=headers)
+        assert created.status_code == 201
+        created_job = created.json()
+        assert created_job["access_mode"] == "MANUAL_CHECK_REQUIRED"
+        assert created_job["enabled"] is False
+        assert created_job["city_name"] == "Toronto"
+        assert created_job["visa_centre_name"] == "Toronto Centre"
+
+        updated = client.patch(
+            f"/api/admin/jobs/{created_job['id']}",
+            json={"enabled": True, "polling_interval": 7200},
+            headers=headers,
+        )
+        assert updated.status_code == 200
+        assert updated.json()["enabled"] is True
+        assert updated.json()["access_mode"] == "MANUAL_CHECK_REQUIRED"
+        assert updated.json()["polling_interval"] == 7200
+
+        duplicate = client.post("/api/admin/jobs", json=payload, headers=headers)
+        invalid_source = client.patch(
+            f"/api/admin/jobs/{created_job['id']}",
+            json={"official_source_url": "http://manual.example/appointments"},
+            headers=headers,
+        )
+        null_update = client.patch(
+            f"/api/admin/jobs/{created_job['id']}",
+            json={"enabled": None},
+            headers=headers,
+        )
+
+    assert duplicate.status_code == 409, duplicate.text
+    assert invalid_source.status_code == 422
+    assert null_update.status_code == 422
+
+
+def test_staff_cannot_create_or_update_monitoring_jobs(tmp_path) -> None:
+    """Staff may view and verify jobs but cannot change job configuration."""
+    app = build_test_app(tmp_path)
+    with TestClient(app) as client:
+        Base.metadata.create_all(app.state.engine)
+        with app.state.session_factory.begin() as session:
+            session.add(
+                Administrator(
+                    username="staff",
+                    password_hash=hash_password("secure-staff-password"),
+                    role="STAFF",
+                    enabled=True,
+                )
+            )
+        job = create_job_record(app)
+        csrf_token = login(
+            client,
+            username="staff",
+            password="secure-staff-password",
+        ).json()["csrf_token"]
+        headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf_token}
+
+        denied_create = client.post(
+            "/api/admin/jobs",
+            json={
+                "origin_id": 1,
+                "destination_country_id": 1,
+                "provider_id": 1,
+                "city_name": "Toronto",
+                "visa_centre_name": "Toronto Centre",
+                "category_name": "Business",
+                "category_code": "business",
+                "appointment_type": "Short Stay",
+                "official_source_url": "https://manual.example/appointments",
+                "polling_interval": 3600,
+            },
+            headers=headers,
+        )
+        denied_update = client.patch(
+            f"/api/admin/jobs/{job.id}",
+            json={"enabled": False},
+            headers=headers,
+        )
+
+    assert denied_create.status_code == 403
+    assert denied_update.status_code == 403

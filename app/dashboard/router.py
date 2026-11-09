@@ -2,25 +2,41 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from urllib.parse import urlsplit
 
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import DatabaseSession, get_current_session
+from app.auth.dependencies import (
+    DatabaseSession,
+    get_current_session,
+    require_csrf,
+    require_role,
+)
+from app.auth.security import is_same_origin
 from app.database.models import (
     Administrator,
     AdministratorSession,
     AlertEvent,
     AvailabilityHistory,
+    ApplicantOrigin,
+    AuditEvent,
+    City,
+    Country,
     MonitoringJob,
     NotificationOutboxItem,
     Provider,
     ProviderPermissionRecord,
     SystemError,
+    utc_now,
+    VisaCategory,
+    VisaCentre,
 )
 from app.monitoring.availability import AvailabilityDetectionService
 
@@ -54,6 +70,91 @@ class ManualVerificationRequest(BaseModel):
     manual_alert_enabled: bool = False
 
 
+class ReferenceOption(BaseModel):
+    """Enabled reference value offered when configuring a monitoring job."""
+
+    id: int
+    name: str
+    code: str | None = None
+
+
+class ProviderOption(ReferenceOption):
+    """Enabled provider value, including its non-overridable access mode."""
+
+    provider_code: str
+    access_mode: str
+
+
+class MonitoringJobOptions(BaseModel):
+    """Reference data required by the job creation form."""
+
+    origins: list[ReferenceOption]
+    countries: list[ReferenceOption]
+    providers: list[ProviderOption]
+
+
+class MonitoringJobCreateRequest(BaseModel):
+    """Administrator-configured job and any missing location/category labels."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    origin_id: int = Field(gt=0)
+    destination_country_id: int = Field(gt=0)
+    provider_id: int = Field(gt=0)
+    city_name: str = Field(min_length=1, max_length=160)
+    visa_centre_name: str = Field(min_length=1, max_length=160)
+    category_name: str = Field(min_length=1, max_length=160)
+    category_code: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^[a-z0-9][a-z0-9_-]*$",
+    )
+    appointment_type: str = Field(min_length=1, max_length=120)
+    official_source_url: str = Field(min_length=1, max_length=2048)
+    polling_interval: int = Field(ge=300, le=2_592_000)
+    jitter_seconds: int = Field(default=30, ge=0, le=86_400)
+    enabled: bool = False
+
+    @field_validator(
+        "city_name",
+        "visa_centre_name",
+        "category_name",
+        "category_code",
+        "appointment_type",
+        mode="before",
+    )
+    @classmethod
+    def strip_text_values(cls, value: object) -> object:
+        """Normalize human-entered labels before persistence."""
+        return value.strip() if isinstance(value, str) else value
+
+
+class MonitoringJobUpdateRequest(BaseModel):
+    """Safe editable fields for a configured monitoring job."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    appointment_type: str | None = Field(default=None, min_length=1, max_length=120)
+    official_source_url: str | None = Field(default=None, min_length=1, max_length=2048)
+    polling_interval: int | None = Field(default=None, ge=300, le=2_592_000)
+    jitter_seconds: int | None = Field(default=None, ge=0, le=86_400)
+    enabled: bool | None = None
+
+    @field_validator("appointment_type", mode="before")
+    @classmethod
+    def strip_appointment_type(cls, value: object) -> object:
+        """Normalize an edited appointment type."""
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def reject_null_updates(self) -> "MonitoringJobUpdateRequest":
+        """Treat explicit nulls as invalid rather than clearing required fields."""
+        for field in self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
+
+
 class DashboardOverview(BaseModel):
     """Aggregated counts for the dashboard landing view."""
 
@@ -70,13 +171,22 @@ class MonitoringJobSummary(BaseModel):
 
     id: int
     appointment_type: str
+    origin_name: str
+    destination_country_name: str
+    city_name: str
+    provider_name: str
+    visa_centre_name: str
+    category_name: str
     availability_status: str | None
     execution_status: str
+    access_mode: str
     enabled: bool
     provider_id: int
     city_id: int
     visa_centre_id: int
     official_source_url: str
+    polling_interval: int
+    jitter_seconds: int
     next_check_at: datetime | None = None
     last_check_at: datetime | None = None
 
@@ -138,6 +248,95 @@ class SystemErrorSummary(BaseModel):
     occurred_at: datetime
 
 
+def _job_summary(session: Session, job: MonitoringJob) -> MonitoringJobSummary:
+    """Build the dashboard representation with labels for related records."""
+    origin = session.get(ApplicantOrigin, job.origin_id)
+    country = session.get(Country, job.destination_country_id)
+    city = session.get(City, job.city_id)
+    provider = session.get(Provider, job.provider_id)
+    centre = session.get(VisaCentre, job.visa_centre_id)
+    category = session.get(VisaCategory, job.category_id)
+    if any(item is None for item in (origin, country, city, provider, centre, category)):
+        raise RuntimeError(f"Monitoring job {job.id} has missing reference data")
+    return MonitoringJobSummary(
+        id=job.id,
+        appointment_type=job.appointment_type,
+        origin_name=origin.name,
+        destination_country_name=country.name,
+        city_name=city.name,
+        provider_name=provider.name,
+        visa_centre_name=centre.name,
+        category_name=category.name,
+        availability_status=job.availability_status,
+        execution_status=job.execution_status,
+        access_mode=job.access_mode,
+        enabled=job.enabled,
+        provider_id=job.provider_id,
+        city_id=job.city_id,
+        visa_centre_id=job.visa_centre_id,
+        official_source_url=job.official_source_url,
+        polling_interval=job.polling_interval,
+        jitter_seconds=job.jitter_seconds,
+        next_check_at=job.next_check_at,
+        last_check_at=job.last_check_at,
+    )
+
+
+def _require_https_url(value: str) -> None:
+    """Reject malformed or non-HTTPS URLs in administrator job settings."""
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Official source URL must be a valid HTTPS URL",
+        ) from error
+    if (
+        parsed.scheme.lower() != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Official source URL must be a valid HTTPS URL without credentials",
+        )
+
+
+def _same_url_origin(first: str, second: str) -> bool:
+    """Compare URL origins using the shared bare-origin security helper."""
+    first_parts = urlsplit(first)
+    second_parts = urlsplit(second)
+    first_origin = f"{first_parts.scheme}://{first_parts.netloc}"
+    second_origin = f"{second_parts.scheme}://{second_parts.netloc}"
+    return is_same_origin(first_origin, second_origin)
+
+
+def _record_management_audit(
+    session: Session,
+    administrator: Administrator,
+    *,
+    action: str,
+    entity_type: str,
+    entity_id: int,
+    safe_metadata: dict[str, object],
+) -> None:
+    """Record an administrator's configuration change without secret values."""
+    session.add(
+        AuditEvent(
+            administrator_id=administrator.id,
+            action=action,
+            entity_type=entity_type,
+            entity_id=str(entity_id),
+            occurred_at=utc_now(),
+            safe_metadata=safe_metadata,
+        )
+    )
+
+
 @router.get("/dashboard/overview", response_model=DashboardOverview, dependencies=[Depends(require_dashboard_access)])
 def dashboard_overview(session: DatabaseSession) -> DashboardOverview:
     """Return core operational metrics for the admin dashboard."""
@@ -164,21 +363,275 @@ def list_jobs(
     if availability_status is not None:
         query = query.filter(MonitoringJob.availability_status == availability_status)
     return [
-        MonitoringJobSummary(
-            id=job.id,
-            appointment_type=job.appointment_type,
-            availability_status=job.availability_status,
-            execution_status=job.execution_status,
-            enabled=job.enabled,
-            provider_id=job.provider_id,
-            city_id=job.city_id,
-            visa_centre_id=job.visa_centre_id,
-            official_source_url=job.official_source_url,
-            next_check_at=job.next_check_at,
-            last_check_at=job.last_check_at,
-        )
+        _job_summary(session, job)
         for job in query.order_by(MonitoringJob.id.asc()).all()
     ]
+
+
+@router.get(
+    "/job-options",
+    response_model=MonitoringJobOptions,
+    dependencies=[Depends(require_dashboard_access)],
+)
+def monitoring_job_options(session: DatabaseSession) -> MonitoringJobOptions:
+    """Return enabled origins, destinations and providers for job configuration."""
+    return MonitoringJobOptions(
+        origins=[
+            ReferenceOption(id=item.id, name=item.name, code=item.code)
+            for item in session.scalars(
+                select(ApplicantOrigin)
+                .where(ApplicantOrigin.enabled.is_(True))
+                .order_by(ApplicantOrigin.name.asc())
+            ).all()
+        ],
+        countries=[
+            ReferenceOption(id=item.id, name=item.name, code=item.country_code)
+            for item in session.scalars(
+                select(Country)
+                .where(Country.enabled.is_(True))
+                .order_by(Country.name.asc())
+            ).all()
+        ],
+        providers=[
+            ProviderOption(
+                id=item.id,
+                name=item.name,
+                code=item.provider_code,
+                provider_code=item.provider_code,
+                access_mode=item.access_mode,
+            )
+            for item in session.scalars(
+                select(Provider)
+                .where(Provider.enabled.is_(True))
+                .order_by(Provider.name.asc())
+            ).all()
+        ],
+    )
+
+
+@router.post(
+    "/jobs",
+    response_model=MonitoringJobSummary,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_role("ADMIN")), Depends(require_csrf)],
+)
+def create_monitoring_job(
+    payload: MonitoringJobCreateRequest,
+    session: DatabaseSession,
+    current: Annotated[
+        tuple[Administrator, AdministratorSession],
+        Depends(get_current_session),
+    ],
+) -> MonitoringJobSummary:
+    """Create a job and its missing city, centre, and category references."""
+    if payload.jitter_seconds > payload.polling_interval:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Jitter cannot exceed the polling interval",
+        )
+    _require_https_url(payload.official_source_url)
+
+    origin = session.get(ApplicantOrigin, payload.origin_id)
+    country = session.get(Country, payload.destination_country_id)
+    provider = session.get(Provider, payload.provider_id)
+    if origin is None or not origin.enabled:
+        raise HTTPException(status_code=404, detail="Enabled applicant origin not found")
+    if country is None or not country.enabled:
+        raise HTTPException(status_code=404, detail="Enabled destination country not found")
+    if provider is None or not provider.enabled:
+        raise HTTPException(status_code=404, detail="Enabled provider not found")
+
+    city = session.scalar(
+        select(City).where(
+            City.country_id == country.id,
+            City.name == payload.city_name,
+        )
+    )
+    if city is None:
+        city = City(country_id=country.id, name=payload.city_name, enabled=True)
+        session.add(city)
+        session.flush()
+
+    centre = session.scalar(
+        select(VisaCentre).where(
+            VisaCentre.city_id == city.id,
+            VisaCentre.provider_id == provider.id,
+            VisaCentre.name == payload.visa_centre_name,
+        )
+    )
+    if centre is None:
+        centre = VisaCentre(
+            city_id=city.id,
+            provider_id=provider.id,
+            name=payload.visa_centre_name,
+            official_url=payload.official_source_url,
+            access_mode=provider.access_mode,
+            enabled=True,
+        )
+        session.add(centre)
+        session.flush()
+    elif not centre.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The selected visa centre is disabled",
+        )
+    elif not _same_url_origin(centre.official_url, payload.official_source_url):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Job source must use the selected centre's official origin",
+        )
+
+    category = session.scalar(
+        select(VisaCategory).where(
+            VisaCategory.category_code == payload.category_code,
+        )
+    )
+    if category is None:
+        category = VisaCategory(
+            name=payload.category_name,
+            category_code=payload.category_code,
+            enabled=True,
+        )
+        session.add(category)
+        session.flush()
+    elif not category.enabled or category.name != payload.category_name:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The category code is already used by another category",
+        )
+
+    duplicate = session.scalar(
+        select(MonitoringJob.id).where(
+            MonitoringJob.origin_id == origin.id,
+            MonitoringJob.destination_country_id == country.id,
+            MonitoringJob.city_id == city.id,
+            MonitoringJob.visa_centre_id == centre.id,
+            MonitoringJob.category_id == category.id,
+            MonitoringJob.appointment_type == payload.appointment_type,
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A job with these monitoring dimensions already exists",
+        )
+
+    access_mode = provider.access_mode
+    if access_mode == "AUTOMATED" and centre.access_mode != "AUTOMATED":
+        access_mode = centre.access_mode
+    now = utc_now()
+    job = MonitoringJob(
+        origin_id=origin.id,
+        destination_country_id=country.id,
+        city_id=city.id,
+        visa_centre_id=centre.id,
+        category_id=category.id,
+        provider_id=provider.id,
+        appointment_type=payload.appointment_type,
+        official_source_url=payload.official_source_url,
+        polling_interval=payload.polling_interval,
+        jitter_seconds=payload.jitter_seconds,
+        enabled=payload.enabled,
+        access_mode=access_mode,
+        execution_status="NOT_RUN",
+        next_check_at=now if payload.enabled else None,
+    )
+    session.add(job)
+    try:
+        session.flush()
+        _record_management_audit(
+            session,
+            current[0],
+            action="monitoring_job.created",
+            entity_type="monitoring_job",
+            entity_id=job.id,
+            safe_metadata={
+                "provider_id": provider.id,
+                "enabled": job.enabled,
+                "access_mode": job.access_mode,
+            },
+        )
+        session.commit()
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A conflicting monitoring configuration already exists",
+        ) from error
+    return _job_summary(session, job)
+
+
+@router.patch(
+    "/jobs/{job_id}",
+    response_model=MonitoringJobSummary,
+    dependencies=[Depends(require_role("ADMIN")), Depends(require_csrf)],
+)
+def update_monitoring_job(
+    job_id: int,
+    payload: MonitoringJobUpdateRequest,
+    session: DatabaseSession,
+    current: Annotated[
+        tuple[Administrator, AdministratorSession],
+        Depends(get_current_session),
+    ],
+) -> MonitoringJobSummary:
+    """Update safe job settings or enable/pause a job without changing access."""
+    job = session.get(MonitoringJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="At least one job setting must be provided",
+        )
+    if "appointment_type" in changes and not changes["appointment_type"]:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Appointment type must not be blank",
+        )
+    if "official_source_url" in changes:
+        _require_https_url(changes["official_source_url"])
+        centre = session.get(VisaCentre, job.visa_centre_id)
+        if centre is None or not _same_url_origin(
+            centre.official_url,
+            changes["official_source_url"],
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Job source must use the selected centre's official origin",
+            )
+    new_polling_interval = changes.get("polling_interval", job.polling_interval)
+    new_jitter_seconds = changes.get("jitter_seconds", job.jitter_seconds)
+    if new_jitter_seconds > new_polling_interval:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Jitter cannot exceed the polling interval",
+        )
+
+    for field in ("appointment_type", "official_source_url", "polling_interval", "jitter_seconds"):
+        if field in changes:
+            setattr(job, field, changes[field])
+    if "enabled" in changes:
+        job.enabled = changes["enabled"]
+    if job.enabled:
+        job.next_check_at = utc_now() + timedelta(seconds=job.polling_interval)
+    else:
+        job.next_check_at = None
+
+    _record_management_audit(
+        session,
+        current[0],
+        action="monitoring_job.updated",
+        entity_type="monitoring_job",
+        entity_id=job.id,
+        safe_metadata={
+            "changed_fields": sorted(changes),
+            "enabled": job.enabled,
+        },
+    )
+    session.commit()
+    return _job_summary(session, job)
 
 
 @router.get("/jobs/{job_id}/history", response_model=list[AvailabilityHistorySummary], dependencies=[Depends(require_dashboard_access)])
