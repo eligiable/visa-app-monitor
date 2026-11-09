@@ -1,128 +1,106 @@
-SRM Visa Appointment Monitoring System
-Project Overview
+# SRM Visa Appointment Monitoring System
 
-A cloud-hosted, 24/7 visa appointment availability monitoring platform for SRM Visa & Immigration Consultants.
+## Overview
 
-The system monitors permitted official visa appointment sources and notifies authorized SRM staff when appointment availability changes from unavailable to available.
+A visa appointment availability monitoring and staff notification platform for
+SRM Visa & Immigration Consultants. The system monitors permitted official
+appointment sources and notifies authorized staff when verified availability
+changes from unavailable to available.
 
-Business Coverage
+## Coverage
 
-Applicant origins
+- **Applicant origins:** Pakistan and the United Arab Emirates (UAE)
+- **Destinations:** United States, Schengen countries, and other countries
+  supported by official appointment providers
+- **Providers:** VFS Global, BLS International, TLScontact, and other
+  officially supported providers
 
-Pakistan
-United Arab Emirates (UAE)
+Provider support must be verified individually. A provider name in
+configuration does not grant permission to automate access.
 
-Destination coverage
+## Features
 
-United States of America
-Schengen countries
-Other European countries supported by official appointment providers
+- Configurable appointment monitoring and provider adapters
+- Manual-check fallback for restricted or unverified provider access
+- Authenticated browser operations dashboard and admin API
+- Country, city, visa-centre, and visa-category reference data
+- Availability history, transition detection, and deduplicated alerts
+- Telegram and SMTP email notification pipeline
+- Operational error and system-health reporting
+- Docker-based deployment and automated tests
 
-Appointment providers
+## Technology
 
-VFS Global
-BLS International
-TLScontact
-Other officially authorized appointment providers
+| Component | Technology |
+| --- | --- |
+| Backend | Python, FastAPI |
+| Database | PostgreSQL (SQLite for development and tests) |
+| ORM and migrations | SQLAlchemy, Alembic |
+| HTTP client | HTTPX |
+| Frontend | HTML, CSS, JavaScript |
+| Authentication | Secure session-based authentication |
+| Notifications | SMTP and Telegram Bot API |
+| Deployment | Docker, Docker Compose |
+| Testing | Pytest |
 
-Provider support must be verified individually. A provider name in the configuration does not imply permission to automate access.
+## Start the Application
 
-Core Features
-Configurable appointment monitoring.
-Provider-specific integration adapters.
-Manual-check fallback for restricted portals.
-Admin dashboard with authentication.
-Country, city, centre and visa-category management.
-Pakistan and UAE applicant-origin configurations.
-Email notifications.
-Telegram notifications.
-Availability history and change detection.
-Error logging and system health monitoring.
-Docker-based deployment.
-Automated testing.
-Technology Stack
-Component	Technology
-Backend	Python, FastAPI
-Database	PostgreSQL
-Initial development database	SQLite
-ORM	SQLAlchemy
-Migrations	Alembic
-Scheduler	APScheduler or equivalent
-HTTP client	HTTPX
-Browser automation	Playwright, only where permitted
-Frontend	HTML, CSS, JavaScript
-Authentication	Secure session-based authentication
-Notifications	SMTP and Telegram Bot API
-Logging	Python structured logging
-Deployment	Docker, Docker Compose
-Testing	Pytest
-Project Setup
+### Requirements
 
-The coding assistant must implement the application in stages according to IMPLEMENTATION_PLAN.md.
+- Docker Engine and the Docker Compose plugin
+- `curl` for optional API checks
 
-Do not attempt to implement every component in one unreviewed code-generation step.
+### Configure secrets
 
-Required Documentation
-
-Read these files before implementing:
-
-PROJECT_BRIEF.md
-ARCHITECTURE.md
-COMPLIANCE.md
-IMPLEMENTATION_PLAN.md
-AGENTS.md
-
-Claude users should also follow CLAUDE.md.
-
-GitHub Copilot users should follow .github/copilot-instructions.md.
-
-Local Development and Admin UI
-
-The project includes a browser-based operations dashboard at the application
-root, backed by the authenticated FastAPI admin API. Accounts are provisioned
-by an administrator; public registration is disabled. Start the project and
-create the first administrator using the steps below.
-Open a terminal in the project directory:
+From the project directory:
 
 ```bash
 cd ~/srm-visa-monitor
 ```
 
-Docker Compose (recommended)
-
-Install Docker Engine and the Docker Compose plugin, then configure the
-development environment:
+Copy the example environment file and generate unique secrets:
 
 ```bash
 cp .env.example .env
+openssl rand -hex 32
 ```
 
-Edit `.env` and replace `POSTGRES_PASSWORD` and `SESSION_SECURITY_KEY` with
-random secrets. Generate each secret with `openssl rand -hex 32`. Keep `.env`
-private and never commit it.
+Edit `.env` and set `POSTGRES_PASSWORD` and `SESSION_SECURITY_KEY` to
+independently generated random values. Keep `.env` private and never commit it.
 
-Start the database, run migrations, and start the API:
+### Start services and create the first account
+
+Start the database, apply migrations, and launch the web app:
 
 ```bash
 docker compose up --build -d
+```
+
+Load initial reference data and create an administrator:
+
+```bash
 docker compose run --rm web srm-seed-reference-data
 docker compose exec web srm-create-admin
 ```
 
 The administrator command prompts for a username and password. Use a password
-of at least 12 characters. The application is available at
-`http://localhost:8000`. The port is bound to localhost; do not expose it
-directly to the internet. Open the URL in a browser and sign in with the
-account you just created. The dashboard includes an overview, job and
-availability history, provider status, alerts, notification deliveries,
-system errors, and a manual-verification workflow.
+of at least 12 characters. Open **http://localhost:8000** in a browser and sign
+in with the account you created. The app is bound to localhost; do not expose it
+directly to the internet.
 
-Health endpoints are available for service checks:
+The dashboard provides an overview, monitoring jobs and availability history,
+provider status, alerts, notification deliveries, system errors, and a
+manual-verification workflow. Sign-in requires an existing `ADMIN` or `STAFF`
+account; public registration is disabled.
+
+### Health and API checks
+
+Health endpoints:
 
 - `http://localhost:8000/health/live`
 - `http://localhost:8000/health/ready`
 
-You can also check the session and dashboard API with curl:
+To check login and the dashboard API with `curl`:
 
 ```bash
 curl -i -c /tmp/srm-cookies.txt \
@@ -140,42 +118,65 @@ curl -i -b /tmp/srm-cookies.txt http://localhost:8000/api/auth/me
 curl -i -b /tmp/srm-cookies.txt http://localhost:8000/api/admin/dashboard/overview
 ```
 
-The login response sets an HttpOnly cookie, so browser JavaScript cannot read
-the session token. The UI uses the cookie and session-bound CSRF token without
-exposing either as page content. The FastAPI OpenAPI/Swagger documentation
-endpoints are disabled. The dashboard is available to authenticated `ADMIN` and `STAFF` accounts.
-`STAFF` accounts can view operational data and record manual verifications;
-the separate administrator ping remains administrator-only.
+The login response sets an HttpOnly cookie. The browser UI uses this cookie and
+the session-bound CSRF token without exposing the session token to JavaScript.
+FastAPI OpenAPI/Swagger endpoints are disabled. `STAFF` accounts can view
+operational data and record manual verifications; the administrator ping
+endpoint remains administrator-only.
 
-When finished, stop the services while retaining the database volume:
+### Stop and inspect
+
+Stop services while keeping the database volume:
 
 ```bash
 docker compose down
 ```
 
-To inspect running services or logs, use `docker compose ps` and
-`docker compose logs -f web`. To remove the database and all its data as well,
-use `docker compose down -v`.
+Inspect service status and web logs with `docker compose ps` and
+`docker compose logs -f web`. To also delete the database volume and its data,
+run `docker compose down -v`.
 
-For local Python development without Docker, use Python 3.12+, install the
-development dependencies, and export the required settings (`DATABASE_URL`
-and `SESSION_SECURITY_KEY`) into the shell environment. Use a local
-PostgreSQL database, or SQLite for development; run `alembic upgrade head`,
-`srm-seed-reference-data`, and `srm-create-admin`, then start the server with:
+## Local Python Development
+
+Use Python 3.12+ and a running PostgreSQL instance or SQLite. Create and
+activate a virtual environment, then install the project and development
+dependencies:
 
 ```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e '.[dev]'
+```
+
+Export the runtime settings in the same shell. For SQLite local development:
+
+```bash
+export DATABASE_URL='sqlite:///./dev.db'
+export SESSION_SECURITY_KEY="$(openssl rand -hex 32)"
+export PUBLIC_ORIGIN='http://localhost:8000'
+export SESSION_COOKIE_NAME='srm_session'
+export SESSION_COOKIE_SECURE='false'
+```
+
+Apply migrations, load reference data, provision an administrator, and start
+the server:
+
+```bash
+alembic upgrade head
+srm-seed-reference-data
+srm-create-admin
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-For plain HTTP local testing, set `PUBLIC_ORIGIN=http://localhost:8000`,
-`SESSION_COOKIE_SECURE=false`, and `SESSION_COOKIE_NAME=srm_session`. The app
-does not create or migrate tables at startup. For later deployments, apply
-schema changes with `docker compose run --rm migrate`.
+The app does not create or migrate tables at startup. For later Docker
+deployments, apply schema changes with `docker compose run --rm migrate`.
 
-For remote production access, place a TLS-terminating reverse proxy in front
-of the app. Set `PUBLIC_ORIGIN` to the HTTPS site origin,
+For remote production access, put a TLS-terminating reverse proxy in front of
+the app. Set `PUBLIC_ORIGIN` to the HTTPS site origin,
 `SESSION_COOKIE_SECURE=true`, and `SESSION_COOKIE_NAME=__Host-srm_session`.
 Use a cloud secret manager where available.
+
+## Provider Access and Compliance
 
 Provider adapters are currently a framework with manual-only placeholders for
 VFS Global, BLS International and TLScontact. No live portal requests are
@@ -184,36 +185,30 @@ enables every relevant provider, centre and job and an active approved
 permission record matches the adapter's declared access method and source and
 includes reviewed terms, evidence and request limits.
 
-Security
-Never commit .env.
-Never expose API keys.
-Use HTTPS in production.
-Require authenticated admin access.
-Use secure password hashing.
-Apply role-based permissions.
-Keep audit logs.
-Protect applicant information.
-Do not store applicant credentials unless strictly necessary and explicitly authorized.
-Compliance
+The application must respect official provider terms, applicable robots.txt
+directives, published rate limits, access restrictions, and applicable law.
+CAPTCHA solving or bypass, queue bypass, session spoofing, IP rotation to evade
+restrictions, and unauthorized portal access are prohibited. Sources without
+verified permission must remain manual-check-only.
 
-The application must respect official provider terms, robots.txt where applicable, published rate limits, access restrictions and applicable law.
+## Security
 
-CAPTCHA solving, CAPTCHA bypass, queue bypass, session spoofing, IP rotation to evade restrictions and unauthorized portal access are prohibited.
+- Never commit `.env` or expose API keys and credentials.
+- Use HTTPS for production access.
+- Require authenticated access and role-based permissions.
+- Use secure password hashing and keep audit logs.
+- Protect applicant information; do not store applicant credentials unless
+  strictly necessary and explicitly authorized.
 
-If automated access is not permitted, the provider must be marked MANUAL_CHECK_REQUIRED.
+## Deployment
 
-Deployment
+The intended deployment environment is Linux cloud infrastructure (for example
+AWS, DigitalOcean, Hetzner, or an equivalent provider). Docker Compose
+configures PostgreSQL persistence, restart policies, container health checks,
+and application startup dependencies. Put the web service behind a
+TLS-terminating reverse proxy before remote access.
 
-The intended deployment environment is a Linux cloud server hosted on:
-
-AWS
-DigitalOcean
-Hetzner
-Equivalent cloud infrastructure
-
-Docker Compose should support application restart policies, persistent database storage, health checks and log collection.
-
-Project Status
+## Project Status
 
 Phases 2–10 are implemented and validated for production-readiness checks:
 SQLAlchemy schema and migrations, seed import, FastAPI health endpoints,
@@ -224,22 +219,24 @@ gating, monitoring engine, availability detection, notification pipeline,
 dashboard API and operational health reporting. VFS Global, BLS International
 and TLScontact remain manual-only, with no live portal access enabled.
 
-Phase 10 production-readiness verification
+## Phase 10 Verification
 
 The project keeps the operational verification path aligned with the
-implementation plan and validates the key production safeguards before release:
+implementation plan and validates the key production safeguards before
+release:
 
-- scheduler heartbeat and stale-health detection are covered by unit tests
-- database readiness and secure response headers are enforced in the main app
-- administrative authentication remains protected by rate limits and session expiry
-- provider permissions, manual verification fallback and stop-on-restriction flow
-  are covered by the provider and API test suite
-- availability transitions, deduplication, cooldown and staff-only alert routing
-  are validated in the monitoring and dashboard tests
-- notification outbox and delivery-attempt failures remain isolated per channel
-  and are retried safely with mock providers
+- Scheduler heartbeat and stale-health detection are covered by unit tests.
+- Database readiness and secure response headers are enforced in the main app.
+- Administrative authentication remains protected by rate limits and session
+  expiry.
+- Provider permissions, manual verification fallback, and stop-on-restriction
+  flow are covered by the provider and API test suite.
+- Availability transitions, deduplication, cooldown, and staff-only alert
+  routing are validated in the monitoring and dashboard tests.
+- Notification outbox and delivery-attempt failures remain isolated per
+  channel and are retried safely with mock providers.
 
-The focused Phase 10 validation command is:
+Run the focused verification suite:
 
 ```bash
 cd ~/srm-visa-monitor && . .venv/bin/activate && pytest -q \
