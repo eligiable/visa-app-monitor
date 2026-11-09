@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111a2e">
+    <title>SRM Visa Monitor | Operations</title>
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <main id="login-view" class="login-layout">
+      <section class="login-card" aria-labelledby="login-title">
+        <div class="brand-mark" aria-hidden="true">SRM</div>
+        <p class="eyebrow">Visa appointment monitoring</p>
+        <h1 id="login-title">Welcome back</h1>
+        <p class="muted">Sign in to view monitoring activity and system status.</p>
+        <form id="login-form">
+          <label for="username">Username</label>
+          <input id="username" name="username" autocomplete="username" required maxlength="120">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required>
+          <button class="button button-primary full-width" type="submit">Sign in</button>
+        </form>
+        <p id="login-error" class="notice notice-error" role="alert" hidden></p>
+        <p class="login-footnote">Sign-in requires an existing administrator or staff account. Public registration is disabled.</p>
+      </section>
+    </main>
+
+    <div id="dashboard-view" class="app-layout" hidden>
+      <aside class="sidebar">
+        <a class="brand" href="/" aria-label="SRM Visa Monitor home">
+          <span class="brand-mark">SRM</span>
+          <span><strong>Visa Monitor</strong><small>Operations console</small></span>
+        </a>
+        <nav class="navigation" aria-label="Dashboard sections">
+          <button class="nav-link active" data-section="overview" type="button"><span>◫</span> Overview</button>
+          <button class="nav-link" data-section="jobs" type="button"><span>▤</span> Monitoring jobs</button>
+          <button class="nav-link" data-section="providers" type="button"><span>◇</span> Providers</button>
+          <button class="nav-link" data-section="alerts" type="button"><span>◉</span> Alerts</button>
+          <button class="nav-link" data-section="notifications" type="button"><span>↗</span> Notifications</button>
+          <button class="nav-link" data-section="errors" type="button"><span>⚠</span> System errors</button>
+        </nav>
+        <div class="sidebar-note">
+          <span class="status-dot"></span>
+          <span><strong>Compliant monitoring</strong><small>Restricted sources stay manual-only.</small></span>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div class="mobile-brand"><span class="brand-mark">SRM</span><strong>Visa Monitor</strong></div>
+          <div class="account">
+            <span class="account-avatar" id="account-avatar">A</span>
+            <span class="account-name"><strong id="account-username">Administrator</strong><small id="account-role">ADMIN</small></span>
+            <button id="logout-button" class="button button-quiet" type="button">Sign out</button>
+          </div>
+        </header>
+
+        <main class="content">
+          <div class="page-heading">
+            <div>
+              <p class="eyebrow">Operations</p>
+              <h1 id="page-title">Overview</h1>
+              <p id="page-description" class="muted">A live snapshot of monitoring and delivery activity.</p>
+            </div>
+            <button id="refresh-button" class="button button-secondary" type="button"><span aria-hidden="true">↻</span> Refresh</button>
+          </div>
+          <p id="dashboard-message" class="notice" role="status" hidden></p>
+          <section id="section-overview" class="dashboard-section">
+            <div id="metric-grid" class="metric-grid"></div>
+            <div class="panel">
+              <div class="panel-heading"><div><h2>Recent availability</h2><p class="muted">Latest configured monitoring jobs</p></div><button class="text-button" data-open-section="jobs" type="button">View all jobs →</button></div>
+              <div id="overview-jobs" class="table-wrap"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-heading"><div><h2>Provider health</h2><p class="muted">Access mode and permission status</p></div><button class="text-button" data-open-section="providers" type="button">View providers →</button></div>
+              <div id="overview-providers" class="table-wrap"></div>
+            </div>
+          </section>
+
+          <section id="section-jobs" class="dashboard-section" hidden>
+            <div class="panel">
+              <div class="panel-heading panel-heading-wrap"><div><h2>Monitoring jobs</h2><p class="muted">Availability, execution state and source</p></div>
+                <label class="filter-label" for="job-filter">Availability</label>
+                <select id="job-filter"><option value="">All statuses</option><option>AVAILABLE</option><option>UNAVAILABLE</option><option>UNKNOWN</option></select>
+              </div>
+              <div id="jobs-table" class="table-wrap"></div>
+            </div>
+            <div id="job-history-panel" class="panel" hidden>
+              <div class="panel-heading"><div><h2 id="history-title">Availability history</h2><p class="muted">Recorded status transitions for this job</p></div><button id="close-history" class="button button-quiet" type="button">Close</button></div>
+              <div id="job-history-table" class="table-wrap"></div>
+            </div>
+          </section>
+
+          <section id="section-providers" class="dashboard-section" hidden><div class="panel"><div class="panel-heading"><div><h2>Providers</h2><p class="muted">Provider health, access mode and permission review status</p></div></div><div id="providers-table" class="table-wrap"></div></div></section>
+          <section id="section-alerts" class="dashboard-section" hidden><div class="panel"><div class="panel-heading"><div><h2>Availability alerts</h2><p class="muted">Verified availability events</p></div></div><div id="alerts-table" class="table-wrap"></div></div></section>
+          <section id="section-notifications" class="dashboard-section" hidden><div class="panel"><div class="panel-heading"><div><h2>Notification deliveries</h2><p class="muted">Outbox state by channel and recipient</p></div></div><div id="notifications-table" class="table-wrap"></div></div></section>
+          <section id="section-errors" class="dashboard-section" hidden><div class="panel"><div class="panel-heading"><div><h2>System errors</h2><p class="muted">Operational and delivery failures</p></div></div><div id="errors-table" class="table-wrap"></div></div></section>
+          <footer class="footer">SRM Visa Monitor <span>•</span> Provider access remains subject to recorded permission.</footer>
+        </main>
+      </section>
+    </div>
+
+    <dialog id="verification-dialog" class="dialog">
+      <form id="verification-form" method="dialog">
+        <div class="panel-heading"><div><p class="eyebrow">Staff action</p><h2>Record manual verification</h2></div><button id="close-dialog" class="icon-button" type="button" aria-label="Close dialog">×</button></div>
+        <p id="verification-job-label" class="muted"></p>
+        <input id="verification-job-id" type="hidden">
+        <label for="verification-status">Observed appointment status</label>
+        <select id="verification-status" required><option value="AVAILABLE">Available</option><option value="UNAVAILABLE">Unavailable</option></select>
+        <label for="verification-url">Official source URL</label>
+        <input id="verification-url" type="url" required maxlength="2048" placeholder="https://official-provider.example">
+        <label for="verification-notes">Internal notes <span class="muted">(optional)</span></label>
+        <textarea id="verification-notes" maxlength="2000" rows="3"></textarea>
+        <label class="checkbox-label"><input id="manual-alert-enabled" type="checkbox"> Send a staff-only manual verification alert</label>
+        <p id="verification-error" class="notice notice-error" role="alert" hidden></p>
+        <div class="dialog-actions"><button id="cancel-verification" class="button button-secondary" type="button">Cancel</button><button class="button button-primary" type="submit">Save verification</button></div>
+      </form>
+    </dialog>
+  </body>
+</html>

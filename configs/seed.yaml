@@ -1,0 +1,54 @@
+origins:
+  - code: "PK"
+    name: Pakistan
+  - code: "AE"
+    name: United Arab Emirates
+
+countries:
+  - code: "US"
+    name: United States
+  - code: "DE"
+    name: Germany
+  - code: "FR"
+    name: France
+  - code: "IT"
+    name: Italy
+  - code: "ES"
+    name: Spain
+  - code: "NL"
+    name: Netherlands
+  - code: "CH"
+    name: Switzerland
+  - code: "AT"
+    name: Austria
+  - code: "BE"
+    name: Belgium
+  - code: "PT"
+    name: Portugal
+  - code: "GR"
+    name: Greece
+  - code: "SE"
+    name: Sweden
+  - code: "NO"
+    name: Norway
+  - code: "DK"
+    name: Denmark
+  - code: "FI"
+    name: Finland
+  - code: "PL"
+    name: Poland
+  - code: "CZ"
+    name: Czech Republic
+  - code: "HU"
+    name: Hungary
+
+providers:
+  - provider_code: vfs_global
+    name: VFS Global
+    access_mode: MANUAL_CHECK_REQUIRED
+  - provider_code: bls_international
+    name: BLS International
+    access_mode: MANUAL_CHECK_REQUIRED
+  - provider_code: tlscontact
+    name: TLScontact
+    access_mode: MANUAL_CHECK_REQUIRED
