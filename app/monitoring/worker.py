@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.monitoring.engine import MonitoringEngine
+from app.notifications.configuration import (
+    NotificationConfigurationError,
+    load_notification_runtime,
+)
+from app.notifications.service import NotificationOutboxService
+
+logger = logging.getLogger(__name__)
 
 
 class MonitoringWorker:
@@ -21,11 +29,13 @@ class MonitoringWorker:
         session_factory: Any,
         poll_interval_seconds: float = 1.0,
         owner: str | None = None,
+        notification_encryption_key: str | None = None,
     ) -> None:
         self.engine = engine
         self.session_factory = session_factory
         self.poll_interval_seconds = poll_interval_seconds
         self.owner = owner or engine.owner
+        self.notification_encryption_key = notification_encryption_key
         self._stopped = False
 
     def stop(self) -> None:
@@ -35,7 +45,26 @@ class MonitoringWorker:
     def _run_once_sync(self, now: datetime | None) -> list[Any]:
         """Run one scheduler poll within a committed database transaction."""
         with self.session_factory.begin() as session:
-            return self.engine.run_due_jobs(session, now=now)
+            results = self.engine.run_due_jobs(session, now=now)
+        if self.notification_encryption_key:
+            with self.session_factory.begin() as session:
+                try:
+                    providers, _ = load_notification_runtime(
+                        session,
+                        self.notification_encryption_key,
+                    )
+                except NotificationConfigurationError:
+                    logger.error(
+                        "Notification settings could not be loaded; delivery was skipped",
+                    )
+                else:
+                    NotificationOutboxService().process_due_notifications(
+                        session,
+                        providers=providers,
+                        channels=providers.keys(),
+                        now=now,
+                    )
+        return results
 
     async def run_once(self, *, now: datetime | None = None) -> list[Any]:
         """Execute one scheduler poll and return the job cycle outputs."""

@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from app.auth.router import create_initial_administrator
@@ -18,6 +19,7 @@ from app.database.models import (
     City,
     Country,
     MonitoringJob,
+    NotificationIntegration,
     NotificationOutboxItem,
     Provider,
     ProviderPermissionRecord,
@@ -26,11 +28,13 @@ from app.database.models import (
     VisaCentre,
 )
 from app.main import create_app
+from app.notifications.configuration import decrypt_configuration
+from app.notifications.providers import SMTPEmailProvider, TelegramNotificationProvider
 
 ORIGIN = "http://testserver"
 
 
-def build_test_app(tmp_path):
+def build_test_app(tmp_path, *, integration_encryption_key: str | None = None):
     """Create an isolated app with a temporary SQLite database."""
     database_path = tmp_path / "dashboard.sqlite"
     settings = Settings(
@@ -38,6 +42,7 @@ def build_test_app(tmp_path):
         session_security_key="test-session-security-key-with-32-bytes-minimum",
         session_cookie_name="eligiable_session",
         session_cookie_secure=False,
+        integration_encryption_key=integration_encryption_key,
     )
     return create_app(settings)
 
@@ -546,3 +551,175 @@ def test_staff_cannot_manage_provider_permission_reviews(tmp_path) -> None:
         )
 
     assert denied.status_code == 403
+
+
+def test_admin_can_configure_encrypted_notification_integrations(tmp_path, monkeypatch) -> None:
+    """Credentials are encrypted, write-only, and test sends are audited."""
+    encryption_key = Fernet.generate_key().decode("ascii")
+    app = build_test_app(tmp_path, integration_encryption_key=encryption_key)
+    with TestClient(app) as client:
+        provision_admin(app)
+        csrf_token = login(client).json()["csrf_token"]
+        headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf_token}
+        telegram_token = "telegram-test-secret-123"
+        smtp_password = "smtp-test-secret-456"
+        telegram_sends = []
+        email_sends = []
+        monkeypatch.setattr(
+            TelegramNotificationProvider,
+            "send",
+            lambda self, *, message, recipient: telegram_sends.append(recipient) or "telegram:1",
+        )
+        monkeypatch.setattr(
+            SMTPEmailProvider,
+            "send",
+            lambda self, *, message, recipient: email_sends.append(recipient) or "smtp:test",
+        )
+
+        telegram = client.put(
+            "/api/admin/integrations/TELEGRAM",
+            json={
+                "enabled": True,
+                "secret": telegram_token,
+                "recipients": ["-10012345"],
+            },
+            headers=headers,
+        )
+        assert telegram.status_code == 200, telegram.text
+        assert telegram.json()["secret_configured"] is True
+        assert telegram_token not in telegram.text
+
+        telegram_test = client.post(
+            "/api/admin/integrations/TELEGRAM/test",
+            headers=headers,
+        )
+        assert telegram_test.status_code == 200, telegram_test.text
+        assert telegram_sends == ["-10012345"]
+
+        preserved = client.put(
+            "/api/admin/integrations/TELEGRAM",
+            json={"enabled": True, "recipients": ["-10054321"]},
+            headers=headers,
+        )
+        assert preserved.status_code == 200, preserved.text
+        with app.state.session_factory() as session:
+            telegram_record = session.query(NotificationIntegration).filter_by(
+                channel="TELEGRAM",
+            ).one()
+            telegram_configuration = decrypt_configuration(
+                telegram_record.encrypted_configuration,
+                encryption_key,
+            )
+        assert telegram_token not in telegram_record.encrypted_configuration
+        assert telegram_configuration["bot_token"] == telegram_token
+        assert telegram_configuration["recipients"] == ["-10054321"]
+
+        email = client.put(
+            "/api/admin/integrations/EMAIL",
+            json={
+                "enabled": True,
+                "secret": smtp_password,
+                "smtp_host": "smtp.example.test",
+                "smtp_port": 587,
+                "smtp_username": "mailer",
+                "smtp_from_email": "alerts@example.test",
+                "smtp_use_tls": True,
+                "recipients": ["ops@example.test"],
+            },
+            headers=headers,
+        )
+        assert email.status_code == 200, email.text
+        assert smtp_password not in email.text
+        email_update = client.put(
+            "/api/admin/integrations/EMAIL",
+            json={
+                "enabled": True,
+                "recipients": ["ops@example.test"],
+                "smtp_host": "smtp.example.test",
+                "smtp_port": 587,
+                "smtp_username": None,
+                "smtp_from_email": "alerts@example.test",
+                "smtp_use_tls": True,
+                "clear_secret": False,
+            },
+            headers=headers,
+        )
+        assert email_update.status_code == 200, email_update.text
+        email_test = client.post(
+            "/api/admin/integrations/EMAIL/test",
+            headers=headers,
+        )
+        assert email_test.status_code == 200, email_test.text
+        assert email_sends == ["ops@example.test"]
+
+        listing = client.get("/api/admin/integrations")
+        assert listing.status_code == 200
+        assert listing.headers["cache-control"] == "no-store"
+        assert telegram_token not in listing.text
+        assert smtp_password not in listing.text
+        with app.state.session_factory() as session:
+            email_record = session.query(NotificationIntegration).filter_by(
+                channel="EMAIL",
+            ).one()
+            email_configuration = decrypt_configuration(
+                email_record.encrypted_configuration,
+                encryption_key,
+            )
+            audit_metadata = [event.safe_metadata for event in session.query(AuditEvent)]
+        assert smtp_password not in email_record.encrypted_configuration
+        assert email_configuration["smtp_password"] == smtp_password
+        assert email_configuration["smtp_username"] == "mailer"
+        assert all(
+            telegram_token not in str(metadata) and smtp_password not in str(metadata)
+            for metadata in audit_metadata
+        )
+
+
+def test_staff_cannot_view_or_change_notification_integrations(tmp_path) -> None:
+    """Notification credentials and settings are administrator-only."""
+    app = build_test_app(tmp_path, integration_encryption_key=Fernet.generate_key().decode())
+    with TestClient(app) as client:
+        Base.metadata.create_all(app.state.engine)
+        with app.state.session_factory.begin() as session:
+            session.add(
+                Administrator(
+                    username="staff",
+                    password_hash=hash_password("secure-staff-password"),
+                    role="STAFF",
+                    enabled=True,
+                )
+            )
+        csrf_token = login(
+            client,
+            username="staff",
+            password="secure-staff-password",
+        ).json()["csrf_token"]
+        headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf_token}
+        denied_list = client.get("/api/admin/integrations")
+        denied_update = client.put(
+            "/api/admin/integrations/TELEGRAM",
+            json={"enabled": False},
+            headers=headers,
+        )
+
+    assert denied_list.status_code == 403
+    assert denied_update.status_code == 403
+
+
+def test_notification_integrations_require_an_encryption_key(tmp_path) -> None:
+    """The admin view remains safe and saves are rejected without a master key."""
+    app = build_test_app(tmp_path)
+    with TestClient(app) as client:
+        provision_admin(app)
+        csrf_token = login(client).json()["csrf_token"]
+        headers = {"Origin": ORIGIN, "X-CSRF-Token": csrf_token}
+        listing = client.get("/api/admin/integrations")
+        rejected = client.put(
+            "/api/admin/integrations/TELEGRAM",
+            json={"enabled": False},
+            headers=headers,
+        )
+
+    assert listing.status_code == 200
+    assert listing.json()["encryption_available"] is False
+    assert rejected.status_code == 503

@@ -40,6 +40,7 @@
           <button class="nav-link" data-section="alerts" type="button"><span>◉</span> Alerts</button>
           <button class="nav-link" data-section="notifications" type="button"><span>↗</span> Notifications</button>
           <button class="nav-link" data-section="errors" type="button"><span>⚠</span> System errors</button>
+           <button class="nav-link" data-section="integrations" data-admin-only type="button"><span>⚙</span> Integrations</button>
           <button class="nav-link" data-section="staff" data-admin-only type="button"><span>♙</span> Staff accounts</button>
         </nav>
         <div class="sidebar-note">
@@ -116,6 +117,51 @@
           <section id="section-alerts" class="dashboard-section" hidden><div class="panel"><div class="panel-heading"><div><h2>Availability alerts</h2><p class="muted">Verified availability events</p></div></div><div id="alerts-table" class="table-wrap"></div></div></section>
           <section id="section-notifications" class="dashboard-section" hidden><div class="panel"><div class="panel-heading"><div><h2>Notification deliveries</h2><p class="muted">Outbox state by channel and recipient</p></div></div><div id="notifications-table" class="table-wrap"></div></div></section>
           <section id="section-errors" class="dashboard-section" hidden><div class="panel"><div class="panel-heading"><div><h2>System errors</h2><p class="muted">Operational and delivery failures</p></div></div><div id="errors-table" class="table-wrap"></div></div></section>
+           <section id="section-integrations" class="dashboard-section" hidden>
+             <div class="integration-key-notice">
+               <strong>Credential encryption</strong>
+               <p>Notification credentials are encrypted before storage. Set <code>INTEGRATION_ENCRYPTION_KEY</code> in the web and worker environments before saving integrations. Keep a protected backup of the key; changing it makes saved credentials unreadable.</p>
+               <p id="integration-key-status" class="integration-key-status" role="status"></p>
+             </div>
+             <div class="integration-grid">
+               <section class="panel integration-panel" aria-labelledby="telegram-integration-title">
+                 <div class="panel-heading"><div><h2 id="telegram-integration-title">Telegram Bot API</h2><p id="telegram-integration-status" class="muted">Not configured</p></div></div>
+                 <form id="telegram-integration-form" class="integration-form">
+                   <label class="checkbox-label"><input id="telegram-enabled" type="checkbox"> Enable Telegram notifications</label>
+                   <div class="field-with-help"><label for="telegram-token">Bot token</label><button class="help-tip" type="button" title="Paste the token issued for your Telegram bot. It is encrypted at rest and shown only as configured after saving." aria-label="Telegram bot token help">?</button></div>
+                   <input id="telegram-token" type="password" maxlength="4096" autocomplete="new-password" placeholder="Enter a new token to replace the saved one">
+                   <label class="checkbox-label"><input id="telegram-clear-token" type="checkbox"> Remove saved bot token</label>
+                   <div class="field-with-help"><label for="telegram-recipients">Chat IDs</label><button class="help-tip" type="button" title="Enter one chat ID per line. Test send goes to the first listed chat ID." aria-label="Telegram chat IDs help">?</button></div>
+                   <textarea id="telegram-recipients" rows="4" maxlength="26000" placeholder="-1001234567890"></textarea>
+                   <p id="telegram-integration-error" class="notice notice-error" role="alert" hidden></p>
+                   <div class="integration-actions"><button class="button button-secondary" data-test-integration="TELEGRAM" type="button">Test send</button><button class="button button-primary" type="submit">Save Telegram</button></div>
+                 </form>
+               </section>
+               <section class="panel integration-panel" aria-labelledby="email-integration-title">
+                 <div class="panel-heading"><div><h2 id="email-integration-title">SMTP Email</h2><p id="email-integration-status" class="muted">Not configured</p></div></div>
+                 <form id="email-integration-form" class="integration-form">
+                   <label class="checkbox-label"><input id="email-enabled" type="checkbox"> Enable Email notifications</label>
+                   <div class="field-with-help"><label for="smtp-host">SMTP host</label><button class="help-tip" type="button" title="The SMTP hostname supplied by your mail provider. Do not include a URL scheme." aria-label="SMTP host help">?</button></div>
+                   <input id="smtp-host" maxlength="255" placeholder="smtp.example.com">
+                   <div class="field-with-help"><label for="smtp-port">SMTP port</label><button class="help-tip" type="button" title="Use the port documented by your email provider, commonly 587 with STARTTLS." aria-label="SMTP port help">?</button></div>
+                   <input id="smtp-port" type="number" min="1" max="65535" value="587">
+                   <label class="checkbox-label"><input id="smtp-use-tls" type="checkbox" checked> Use STARTTLS</label>
+                   <label for="smtp-username">SMTP username <span class="muted">(optional)</span></label>
+                   <input id="smtp-username" maxlength="255" autocomplete="off">
+                   <label class="checkbox-label"><input id="smtp-clear-username" type="checkbox"> Remove saved SMTP username</label>
+                   <div class="field-with-help"><label for="smtp-password">SMTP password</label><button class="help-tip" type="button" title="Paste an app-specific SMTP password. It is encrypted at rest and never displayed after saving." aria-label="SMTP password help">?</button></div>
+                   <input id="smtp-password" type="password" maxlength="4096" autocomplete="new-password" placeholder="Enter a new password to replace the saved one">
+                   <label class="checkbox-label"><input id="smtp-clear-password" type="checkbox"> Remove saved SMTP password</label>
+                   <label for="smtp-from-email">From address</label>
+                   <input id="smtp-from-email" type="email" maxlength="320" placeholder="alerts@example.com">
+                   <div class="field-with-help"><label for="email-recipients">Recipients</label><button class="help-tip" type="button" title="Enter one recipient email address per line. Test send goes to the first listed address." aria-label="Email recipients help">?</button></div>
+                   <textarea id="email-recipients" rows="4" maxlength="32000" placeholder="operations@example.com"></textarea>
+                   <p id="email-integration-error" class="notice notice-error" role="alert" hidden></p>
+                   <div class="integration-actions"><button class="button button-secondary" data-test-integration="EMAIL" type="button">Test send</button><button class="button button-primary" type="submit">Save Email</button></div>
+                 </form>
+               </section>
+             </div>
+           </section>
           <section id="section-staff" class="dashboard-section" hidden>
             <div class="panel">
               <div class="panel-heading"><div><h2>Staff accounts</h2><p class="muted">Accounts provisioned by administrators</p></div><button id="create-staff-button" class="button button-primary" type="button">Create staff account</button></div>

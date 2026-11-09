@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -11,12 +12,15 @@ from app.database.models import (
     City,
     Country,
     MonitoringJob,
+    NotificationIntegration,
+    NotificationOutboxItem,
     Provider,
     ProviderPermissionRecord,
     VisaCategory,
     VisaCentre,
 )
 from app.monitoring.engine import CircuitBreaker, JobExecutionPolicy, MonitoringEngine
+from app.notifications.configuration import encrypt_configuration
 from app.providers.base import BaseProvider
 from app.providers.models import (
     AvailabilityStatus,
@@ -150,6 +154,43 @@ def test_monitoring_engine_claims_and_executes_a_due_job(database_session: Sessi
     assert job.execution_status == "SUCCEEDED"
     assert job.availability_status == "AVAILABLE"
     assert job.next_check_at is not None
+
+
+def test_monitoring_engine_queues_alert_for_configured_recipient(
+    database_session: Session,
+) -> None:
+    """The worker engine connects authorized transitions to the notification outbox."""
+    job = _create_job(database_session)
+    job.availability_status = "UNAVAILABLE"
+    job.initial_available_alert_policy = True
+    provider = database_session.get(Provider, job.provider_id)
+    permission = _create_permission(database_session, provider)
+    encryption_key = Fernet.generate_key().decode("ascii")
+    database_session.add(
+        NotificationIntegration(
+            channel="TELEGRAM",
+            enabled=True,
+            encrypted_configuration=encrypt_configuration(
+                {"bot_token": "test-token", "recipients": ["-10012345"]},
+                encryption_key,
+            ),
+            updated_by_administrator_id=permission.responsible_administrator_id,
+        )
+    )
+    database_session.flush()
+    engine = MonitoringEngine(
+        registry=ProviderRegistry((_AuthorizedStubAdapter(),)),
+        owner="unit-test-scheduler",
+        notification_encryption_key=encryption_key,
+    )
+
+    result = engine.run_job(database_session, job, now=NOW)
+
+    assert result.executed is True
+    assert database_session.query(NotificationOutboxItem).count() == 1
+    queued = database_session.query(NotificationOutboxItem).one()
+    assert queued.channel == "TELEGRAM"
+    assert queued.recipient_reference == "-10012345"
 
 
 def test_monitoring_engine_recovers_expired_leases(database_session: Session) -> None:

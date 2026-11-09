@@ -12,6 +12,7 @@ from app.database.models import (
     Country,
     ApplicantOrigin,
     MonitoringJob,
+    NotificationOutboxItem,
     Provider,
     VisaCategory,
     VisaCentre,
@@ -108,6 +109,7 @@ def test_first_available_result_creates_no_alert_by_default(database_session: Se
     assert history is not None
     assert job.availability_status == "AVAILABLE"
     assert database_session.query(AlertEvent).count() == 0
+    assert database_session.query(NotificationOutboxItem).count() == 0
 
 
 def test_available_transition_creates_alert_and_history(database_session: Session) -> None:
@@ -124,6 +126,28 @@ def test_available_transition_creates_alert_and_history(database_session: Sessio
     assert history.new_status == "AVAILABLE"
     assert database_session.query(AlertEvent).count() == 1
     assert database_session.query(AlertEvent).one().verification_source == "AUTOMATED"
+
+
+def test_available_transition_queues_configured_recipients(database_session: Session) -> None:
+    """An alert passing transition policy creates outbox entries for recipients."""
+    job = _create_job(database_session, initial_policy=True)
+    job.availability_status = "UNAVAILABLE"
+    database_session.flush()
+    result = _create_check_result(database_session, job, status="AVAILABLE")
+
+    history = AvailabilityDetectionService().process_check_result(
+        database_session,
+        job.id,
+        result.id,
+        now=NOW,
+        notification_recipients={"TELEGRAM": ["-10012345"], "EMAIL": []},
+    )
+
+    assert history is not None
+    queued = database_session.query(NotificationOutboxItem).all()
+    assert [(item.channel, item.recipient_reference) for item in queued] == [
+        ("TELEGRAM", "-10012345"),
+    ]
 
 
 def test_unavailable_result_does_not_create_alert(database_session: Session) -> None:

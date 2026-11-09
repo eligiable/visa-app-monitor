@@ -73,7 +73,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "connect-src 'self'; img-src 'self' data:; "
             "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         )
-        if request.url.path.startswith("/api/auth/"):
+        if (
+            request.url.path.startswith("/api/auth/")
+            or request.url.path.startswith("/api/admin/integrations")
+        ):
             response.headers["Cache-Control"] = "no-store"
         runtime_settings = getattr(request.app.state, "settings", None)
         if runtime_settings and runtime_settings.session_cookie_secure:

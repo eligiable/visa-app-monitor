@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+from cryptography.fernet import Fernet
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -366,3 +367,21 @@ def test_settings_reject_weak_key_and_insecure_cookie_name() -> None:
             session_security_key="test-session-security-key-with-32-bytes-minimum",
             public_origin="http://example.test",
         )
+    with pytest.raises(ValueError, match="valid Fernet key"):
+        Settings(
+            database_url="sqlite://",
+            session_security_key="test-session-security-key-with-32-bytes-minimum",
+            integration_encryption_key="not-a-fernet-key",
+        )
+    settings = Settings(
+        database_url="sqlite://",
+        session_security_key="test-session-security-key-with-32-bytes-minimum",
+        integration_encryption_key=Fernet.generate_key().decode("ascii"),
+    )
+    assert settings.integration_encryption_key is not None
+    settings_without_integration_key = Settings(
+        database_url="sqlite://",
+        session_security_key="test-session-security-key-with-32-bytes-minimum",
+        integration_encryption_key="",
+    )
+    assert settings_without_integration_key.integration_encryption_key is None

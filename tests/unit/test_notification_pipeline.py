@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime
 
+import httpx
+import pytest
 from sqlalchemy.orm import Session
 
 from app.database.models import (
@@ -20,6 +22,7 @@ from app.database.models import (
     VisaCentre,
 )
 from app.notifications.service import NotificationOutboxService
+from app.notifications.providers import TelegramNotificationProvider
 
 NOW = datetime(2026, 11, 9, 9, 0, tzinfo=UTC)
 SOURCE_URL = "https://provider.example/appointments"
@@ -173,6 +176,30 @@ def test_outbox_delivery_records_successful_attempts(database_session: Session) 
     assert database_session.query(NotificationDeliveryAttempt).count() == 2
 
 
+def test_disabled_channel_leaves_pending_items_queued(database_session: Session) -> None:
+    """Disabling a channel pauses its outbox items without failing them."""
+    alert = _create_alert(database_session)
+    service = NotificationOutboxService()
+    queued = service.queue_alert_notifications(
+        database_session,
+        alert.id,
+        recipients={"TELEGRAM": ["-10012345"]},
+        now=NOW,
+    )
+
+    processed = service.process_due_notifications(
+        database_session,
+        providers={},
+        channels=[],
+        now=NOW,
+    )
+
+    assert len(queued) == 1
+    assert processed == []
+    assert queued[0].state == "PENDING"
+    assert database_session.query(NotificationDeliveryAttempt).count() == 0
+
+
 def test_delivery_failure_is_logged_without_erase_other_channel_outcomes(database_session: Session) -> None:
     alert = _create_alert(database_session)
     service = NotificationOutboxService(max_attempts=1)
@@ -198,3 +225,43 @@ def test_delivery_failure_is_logged_without_erase_other_channel_outcomes(databas
     assert database_session.query(NotificationOutboxItem).filter(NotificationOutboxItem.channel == "TELEGRAM").one().state == "DELIVERED"
     assert database_session.query(NotificationDeliveryAttempt).filter(NotificationDeliveryAttempt.delivery_status == "FAILED").count() == 1
     assert database_session.query(SystemError).count() == 1
+
+
+def test_telegram_api_error_does_not_expose_bot_token(monkeypatch) -> None:
+    """Telegram error bodies and request URLs must not leak the bot token."""
+    token = "sensitive-bot-token"
+
+    class FailedResponse:
+        status_code = 401
+        text = f"error from https://api.telegram.org/bot{token}/sendMessage"
+
+    monkeypatch.setattr(
+        "app.notifications.providers.httpx.post",
+        lambda *args, **kwargs: FailedResponse(),
+    )
+    with pytest.raises(RuntimeError) as failure:
+        TelegramNotificationProvider(bot_token=token).send(
+            message="test",
+            recipient="-10012345",
+        )
+    assert token not in str(failure.value)
+
+
+def test_telegram_transport_error_does_not_expose_bot_token(monkeypatch) -> None:
+    """HTTP request exception strings can contain the token-bearing URL."""
+    token = "sensitive-bot-token"
+    request = httpx.Request(
+        "POST",
+        f"https://api.telegram.org/bot{token}/sendMessage",
+    )
+
+    def fail_request(*args, **kwargs):
+        raise httpx.RequestError(f"request failed for {request.url}", request=request)
+
+    monkeypatch.setattr("app.notifications.providers.httpx.post", fail_request)
+    with pytest.raises(RuntimeError) as failure:
+        TelegramNotificationProvider(bot_token=token).send(
+            message="test",
+            recipient="-10012345",
+        )
+    assert token not in str(failure.value)

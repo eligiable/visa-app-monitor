@@ -3,13 +3,14 @@
 const $ = (selector) => document.querySelector(selector);
 const loginView = $("#login-view");
 const dashboardView = $("#dashboard-view");
-const sections = ["overview", "jobs", "providers", "alerts", "notifications", "errors", "staff"];
+const sections = ["overview", "jobs", "providers", "alerts", "notifications", "integrations", "errors", "staff"];
 const descriptions = {
   overview: "A live snapshot of monitoring and delivery activity.",
   jobs: "Availability, execution state and source for each configured job.",
   providers: "Provider access state, compliance documentation and review status.",
   alerts: "Verified availability events and their provenance.",
   notifications: "Outbox state by channel and recipient.",
+  integrations: "Notification credentials, recipients and delivery tests.",
   errors: "Operational and delivery failures recorded by the system.",
   staff: "Staff accounts provisioned by administrators.",
 };
@@ -120,7 +121,7 @@ function statusColumn(key, label = "Status") {
 
 function navigate(section) {
   if (!sections.includes(section)) return;
-  if (section === "staff" && currentUser?.role !== "ADMIN") return;
+  if (["staff", "integrations"].includes(section) && currentUser?.role !== "ADMIN") return;
   document.querySelectorAll(".dashboard-section").forEach((element) => {
     element.hidden = element.id !== `section-${section}`;
   });
@@ -361,9 +362,55 @@ async function loadStaff() {
   ], staff, "No staff accounts have been created.");
 }
 
+function parseRecipientLines(selector) {
+  return $(selector).value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+}
+
+async function loadIntegrations() {
+  const data = await request("/api/admin/integrations");
+  $("#integration-key-status").textContent = data.encryption_available
+    ? "Encryption key is available."
+    : "Encryption key is missing. Integrations cannot be saved until it is configured.";
+  $("#integration-key-status").classList.toggle("is-error", !data.encryption_available);
+  document.querySelectorAll(
+    "#section-integrations button[type=submit], #section-integrations [data-test-integration]",
+  ).forEach((button) => {
+    button.disabled = !data.encryption_available;
+  });
+  for (const integration of data.integrations) {
+    if (integration.channel === "TELEGRAM") {
+      $("#telegram-enabled").checked = integration.enabled;
+      $("#telegram-token").value = "";
+      $("#telegram-clear-token").checked = false;
+      $("#telegram-recipients").value = integration.recipients.join("\n");
+      $("#telegram-integration-status").textContent = integration.configured
+        ? `${integration.enabled ? "Enabled" : "Disabled"} · ${integration.secret_configured ? "Bot token saved" : "No bot token"} · ${integration.recipients.length} recipient(s)`
+        : "Not configured";
+    } else {
+      $("#email-enabled").checked = integration.enabled;
+      $("#smtp-host").value = integration.smtp_host || "";
+      $("#smtp-port").value = String(integration.smtp_port || 587);
+      $("#smtp-username").value = "";
+      $("#smtp-password").value = "";
+      $("#smtp-clear-username").checked = false;
+      $("#smtp-clear-password").checked = false;
+      $("#smtp-from-email").value = integration.smtp_from_email || "";
+      $("#smtp-use-tls").checked = integration.smtp_use_tls ?? true;
+      $("#email-recipients").value = integration.recipients.join("\n");
+      const authentication = integration.username_configured
+        ? ` · ${integration.secret_configured ? "SMTP password saved" : "SMTP password missing"}`
+        : "";
+      $("#email-integration-status").textContent = integration.configured
+        ? `${integration.enabled ? "Enabled" : "Disabled"} · ${integration.smtp_host || "Host missing"}${authentication} · ${integration.recipients.length} recipient(s)`
+        : "Not configured";
+    }
+  }
+}
+
 async function loadSection(section) {
   if (!currentUser) return;
   if (section === "staff" && currentUser.role !== "ADMIN") return;
+  if (section === "integrations" && currentUser.role !== "ADMIN") return;
   showNotice("");
   try {
     if (section === "overview") await loadOverview();
@@ -399,6 +446,7 @@ async function loadSection(section) {
       ], errors);
     }
     if (section === "staff") await loadStaff();
+    if (section === "integrations") await loadIntegrations();
   } catch (error) {
     if (currentUser) showNotice(error.message, "notice-error");
   }
@@ -511,6 +559,81 @@ document.querySelectorAll("[data-close-dialog]").forEach((button) => {
     if (dialog.id === "staff-dialog") $("#staff-form").reset();
     if (dialog.id === "job-dialog") $("#job-form").reset();
     if (dialog.id === "provider-review-dialog") $("#provider-review-form").reset();
+  });
+});
+
+async function saveIntegration(channel, form) {
+  const isTelegram = channel === "TELEGRAM";
+  const error = $(`#${isTelegram ? "telegram" : "email"}-integration-error`);
+  error.hidden = true;
+  const payload = isTelegram
+    ? {
+        enabled: $("#telegram-enabled").checked,
+        recipients: parseRecipientLines("#telegram-recipients"),
+        clear_secret: $("#telegram-clear-token").checked,
+      }
+    : {
+        enabled: $("#email-enabled").checked,
+        recipients: parseRecipientLines("#email-recipients"),
+        smtp_host: $("#smtp-host").value.trim() || null,
+        smtp_port: Number($("#smtp-port").value),
+        smtp_username: $("#smtp-username").value.trim() || null,
+        clear_smtp_username: $("#smtp-clear-username").checked,
+        smtp_from_email: $("#smtp-from-email").value.trim() || null,
+        smtp_use_tls: $("#smtp-use-tls").checked,
+        clear_secret: $("#smtp-clear-password").checked,
+      };
+  const secret = $(isTelegram ? "#telegram-token" : "#smtp-password").value;
+  if (secret) payload.secret = secret;
+  try {
+    await request(`/api/admin/integrations/${channel}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    $(isTelegram ? "#telegram-token" : "#smtp-password").value = "";
+    showNotice(`${isTelegram ? "Telegram" : "Email"} integration saved.`);
+    await loadIntegrations();
+  } catch (requestError) {
+    error.textContent = requestError.message;
+    error.hidden = false;
+  }
+}
+
+$("#telegram-integration-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await saveIntegration("TELEGRAM", event.currentTarget);
+});
+
+$("#email-integration-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await saveIntegration("EMAIL", event.currentTarget);
+});
+
+document.querySelectorAll("[data-test-integration]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const channel = button.dataset.testIntegration;
+    const isTelegram = channel === "TELEGRAM";
+    const error = $(`#${isTelegram ? "telegram" : "email"}-integration-error`);
+    error.hidden = true;
+    const recipient = parseRecipientLines(
+      isTelegram ? "#telegram-recipients" : "#email-recipients",
+    )[0];
+    if (!recipient) {
+      error.textContent = "Add at least one recipient before sending a test.";
+      error.hidden = false;
+      return;
+    }
+    if (!window.confirm(`Send a test notification to ${recipient}? Save changes first if needed.`)) return;
+    button.disabled = true;
+    try {
+      await request(`/api/admin/integrations/${channel}/test`, { method: "POST" });
+      showNotice(`Test notification sent through ${isTelegram ? "Telegram" : "Email"}.`);
+    } catch (requestError) {
+      error.textContent = requestError.message;
+      error.hidden = false;
+    } finally {
+      button.disabled = false;
+    }
   });
 });
 

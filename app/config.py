@@ -2,6 +2,7 @@
 
 from urllib.parse import urlsplit
 
+from cryptography.fernet import Fernet
 from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,15 +25,7 @@ class Settings(BaseSettings):
     auth_rate_limit_max_attempts: int = 5
     auth_rate_limit_window_seconds: int = 900
     auth_rate_limit_retention_seconds: int = 172_800
-    telegram_bot_token: SecretStr | None = None
-    telegram_default_chat_id: str | None = None
-    smtp_host: str | None = None
-    smtp_port: int = 587
-    smtp_username: str | None = None
-    smtp_password: SecretStr | None = None
-    smtp_from_email: str | None = None
-    smtp_use_tls: bool = True
-    notification_default_channels: list[str] = ["EMAIL"]
+    integration_encryption_key: SecretStr | None = None
     log_level: str = "INFO"
 
     @field_validator("session_security_key")
@@ -43,6 +36,21 @@ class Settings(BaseSettings):
             raise ValueError("SESSION_SECURITY_KEY must contain at least 32 bytes")
         return value
 
+    @field_validator("integration_encryption_key")
+    @classmethod
+    def validate_integration_encryption_key(
+        cls,
+        value: SecretStr | None,
+    ) -> SecretStr | None:
+        """Require a valid Fernet key whenever dashboard integrations are enabled."""
+        if value is None or not value.get_secret_value():
+            return None
+        try:
+            Fernet(value.get_secret_value().encode("ascii"))
+        except (UnicodeEncodeError, ValueError) as error:
+            raise ValueError("INTEGRATION_ENCRYPTION_KEY must be a valid Fernet key") from error
+        return value
+
     @field_validator("session_cookie_name")
     @classmethod
     def validate_cookie_name(cls, value: str) -> str:
@@ -50,27 +58,6 @@ class Settings(BaseSettings):
         if not value or any(character in value for character in " ;,\r\n\t"):
             raise ValueError("SESSION_COOKIE_NAME contains invalid characters")
         return value
-
-    @field_validator("smtp_port")
-    @classmethod
-    def validate_smtp_port(cls, value: int) -> int:
-        """Keep SMTP ports within the standard TCP range."""
-        if not 1 <= value <= 65535:
-            raise ValueError("SMTP_PORT must be between 1 and 65535")
-        return value
-
-    @field_validator("notification_default_channels")
-    @classmethod
-    def validate_notification_default_channels(cls, value: list[str]) -> list[str]:
-        """Restrict notification channels to known delivery methods."""
-        allowed = {"EMAIL", "TELEGRAM"}
-        normalized = []
-        for channel in value:
-            candidate = channel.strip().upper()
-            if candidate not in allowed:
-                raise ValueError("unsupported notification channel")
-            normalized.append(candidate)
-        return normalized
 
     @model_validator(mode="after")
     def require_host_cookie_prefix_when_secure(self) -> "Settings":

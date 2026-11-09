@@ -5,15 +5,23 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import logging
 import random
 
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.database.models import CheckResult, MonitoringJob, Provider
+from app.monitoring.availability import AvailabilityDetectionService
+from app.notifications.configuration import (
+    NotificationConfigurationError,
+    load_notification_recipients,
+)
 from app.providers.models import CheckExecutionStatus
 from app.providers.registry import ProviderRegistry
 from app.providers.service import execute_provider_check
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -116,10 +124,12 @@ class MonitoringEngine:
         registry: ProviderRegistry | None = None,
         owner: str = "scheduler-default",
         policy: JobExecutionPolicy | None = None,
+        notification_encryption_key: str | None = None,
     ) -> None:
         self.registry = registry or ProviderRegistry(())
         self.owner = owner
         self.policy = policy or JobExecutionPolicy()
+        self.notification_encryption_key = notification_encryption_key
         self._circuit_breakers: dict[str, CircuitBreaker] = {}
 
     def get_circuit_breaker(self, provider_code: str) -> CircuitBreaker:
@@ -359,6 +369,23 @@ class MonitoringEngine:
         )
         session.add(check_record)
         session.flush()
+        try:
+            notification_recipients = load_notification_recipients(
+                session,
+                self.notification_encryption_key,
+            )
+        except NotificationConfigurationError:
+            notification_recipients = {}
+            logger.warning(
+                "Notification settings could not be decrypted; delivery was skipped",
+            )
+        AvailabilityDetectionService().process_check_result(
+            session,
+            job.id,
+            check_record.id,
+            now=scheduled_now,
+            notification_recipients=notification_recipients,
+        )
 
         self.release_job(
             session,

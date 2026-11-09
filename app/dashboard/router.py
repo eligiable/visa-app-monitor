@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from email.utils import parseaddr
 from urllib.parse import urlsplit
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -30,6 +31,7 @@ from app.database.models import (
     City,
     Country,
     MonitoringJob,
+    NotificationIntegration,
     NotificationOutboxItem,
     Provider,
     ProviderPermissionRecord,
@@ -39,6 +41,14 @@ from app.database.models import (
     VisaCentre,
 )
 from app.monitoring.availability import AvailabilityDetectionService
+from app.notifications.configuration import (
+    NotificationConfigurationError,
+    decrypt_configuration,
+    encrypt_configuration,
+    get_integration_configuration,
+    load_notification_recipients,
+)
+from app.notifications.providers import SMTPEmailProvider, TelegramNotificationProvider
 
 router = APIRouter(prefix="/api/admin")
 
@@ -271,6 +281,88 @@ class ProviderPermissionApproval(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     review_due_at: datetime
+
+
+class IntegrationUpdateRequest(BaseModel):
+    """Editable Telegram or SMTP settings; secret values are write-only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    secret: str | None = Field(default=None, max_length=4096)
+    clear_secret: bool = False
+    recipients: list[str] | None = Field(default=None, max_length=100)
+    smtp_host: str | None = Field(default=None, max_length=255)
+    smtp_port: int | None = Field(default=None, ge=1, le=65535)
+    smtp_username: str | None = Field(default=None, max_length=255)
+    clear_smtp_username: bool = False
+    smtp_from_email: str | None = Field(default=None, max_length=320)
+    smtp_use_tls: bool | None = None
+
+    @field_validator(
+        "secret",
+        "smtp_host",
+        "smtp_username",
+        "smtp_from_email",
+        mode="before",
+    )
+    @classmethod
+    def strip_integration_values(cls, value: object) -> object:
+        """Trim optional configuration strings before validation."""
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("recipients")
+    @classmethod
+    def validate_recipients(cls, value: list[str] | None) -> list[str] | None:
+        """Reject blank or oversized recipient references."""
+        if value is None:
+            return None
+        normalized = [recipient.strip() for recipient in value]
+        if any(not recipient or len(recipient) > 255 for recipient in normalized):
+            raise ValueError("recipients must be non-empty values up to 255 characters")
+        return list(dict.fromkeys(normalized))
+
+    @model_validator(mode="after")
+    def reject_ambiguous_integration_updates(self) -> "IntegrationUpdateRequest":
+        """Reject explicit nulls and conflicting set/clear operations."""
+        if "enabled" in self.model_fields_set and self.enabled is None:
+            raise ValueError("enabled cannot be null")
+        if "recipients" in self.model_fields_set and self.recipients is None:
+            raise ValueError("recipients cannot be null")
+        if self.clear_secret and self.secret:
+            raise ValueError("provide a new secret or clear it, not both")
+        if self.clear_smtp_username and self.smtp_username:
+            raise ValueError("provide a username or clear it, not both")
+        return self
+
+
+class IntegrationSummary(BaseModel):
+    """Safe integration settings view with no credential material."""
+
+    channel: str
+    enabled: bool
+    configured: bool
+    recipients: list[str] = Field(default_factory=list)
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_from_email: str | None = None
+    smtp_use_tls: bool | None = None
+    username_configured: bool = False
+    secret_configured: bool = False
+
+
+class IntegrationListResponse(BaseModel):
+    """Configured channel views and encryption-key readiness."""
+
+    encryption_available: bool
+    integrations: list[IntegrationSummary]
+
+
+class IntegrationTestResponse(BaseModel):
+    """Safe result of a notification provider test send."""
+
+    status: str
+    channel: str
 
 
 class AvailabilityHistorySummary(BaseModel):
@@ -1007,6 +1099,304 @@ def revoke_provider_permission(
     return _provider_permission_summary(permission)
 
 
+_NOTIFICATION_CHANNELS = ("TELEGRAM", "EMAIL")
+
+
+def _integration_key(request: Request) -> str | None:
+    """Return the configured master key without exposing it in API responses."""
+    key = request.app.state.settings.integration_encryption_key
+    return key.get_secret_value() if key is not None else None
+
+
+def _integration_summary(
+    channel: str,
+    integration: NotificationIntegration | None,
+    configuration: dict[str, object] | None,
+) -> IntegrationSummary:
+    """Build a channel view that contains no token, password, or username."""
+    config = configuration or {}
+    return IntegrationSummary(
+        channel=channel,
+        enabled=integration.enabled if integration else False,
+        configured=integration is not None,
+        recipients=[str(value) for value in config.get("recipients", [])],
+        smtp_host=config.get("smtp_host") if channel == "EMAIL" else None,
+        smtp_port=config.get("smtp_port") if channel == "EMAIL" else None,
+        smtp_from_email=(
+            config.get("smtp_from_email") if channel == "EMAIL" else None
+        ),
+        smtp_use_tls=config.get("smtp_use_tls") if channel == "EMAIL" else None,
+        username_configured=bool(config.get("smtp_username")) if channel == "EMAIL" else False,
+        secret_configured=bool(
+            config.get("bot_token") if channel == "TELEGRAM" else config.get("smtp_password")
+        ),
+    )
+
+
+@router.get(
+    "/integrations",
+    response_model=IntegrationListResponse,
+    dependencies=[Depends(require_role("ADMIN"))],
+)
+def list_notification_integrations(
+    request: Request,
+    session: DatabaseSession,
+) -> IntegrationListResponse:
+    """List safe notification settings; never return credential material."""
+    encryption_key = _integration_key(request)
+    summaries = []
+    for channel in _NOTIFICATION_CHANNELS:
+        integration = session.scalar(
+            select(NotificationIntegration).where(
+                NotificationIntegration.channel == channel,
+            )
+        )
+        configuration = None
+        if integration is not None and encryption_key:
+            try:
+                configuration = decrypt_configuration(
+                    integration.encrypted_configuration,
+                    encryption_key,
+                )
+            except NotificationConfigurationError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Saved integration settings cannot be decrypted; check the encryption key",
+                ) from error
+        summaries.append(_integration_summary(channel, integration, configuration))
+    return IntegrationListResponse(
+        encryption_available=bool(encryption_key),
+        integrations=summaries,
+    )
+
+
+def _valid_email(value: str) -> bool:
+    """Accept one plain email address without display names or line breaks."""
+    return "\r" not in value and "\n" not in value and parseaddr(value)[1] == value and "@" in value
+
+
+@router.put(
+    "/integrations/{channel}",
+    response_model=IntegrationSummary,
+    dependencies=[Depends(require_role("ADMIN")), Depends(require_csrf)],
+)
+def update_notification_integration(
+    channel: str,
+    payload: IntegrationUpdateRequest,
+    request: Request,
+    session: DatabaseSession,
+    current: Annotated[
+        tuple[Administrator, AdministratorSession],
+        Depends(get_current_session),
+    ],
+) -> IntegrationSummary:
+    """Create or update an encrypted Telegram or SMTP integration."""
+    channel = channel.upper()
+    if channel not in _NOTIFICATION_CHANNELS:
+        raise HTTPException(status_code=404, detail="Notification channel not found")
+    encryption_key = _integration_key(request)
+    if not encryption_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Set INTEGRATION_ENCRYPTION_KEY before saving integrations",
+        )
+    try:
+        integration, previous = get_integration_configuration(
+            session,
+            channel,
+            encryption_key,
+        )
+    except NotificationConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Saved integration settings cannot be decrypted; check the encryption key",
+        ) from error
+
+    fields = payload.model_fields_set
+    values = payload.model_dump(exclude_unset=True)
+    configuration = previous or {}
+    enabled = values.get("enabled", integration.enabled if integration else False)
+    recipients = values.get("recipients", configuration.get("recipients", []))
+    secret = configuration.get("bot_token" if channel == "TELEGRAM" else "smtp_password")
+    if payload.clear_secret:
+        secret = None
+    elif payload.secret:
+        secret = payload.secret
+
+    if channel == "TELEGRAM":
+        smtp_fields = {
+            "smtp_host", "smtp_port", "smtp_username", "clear_smtp_username",
+            "smtp_from_email", "smtp_use_tls",
+        }
+        if fields & smtp_fields:
+            raise HTTPException(status_code=422, detail="SMTP settings are not valid for Telegram")
+        if enabled and (not secret or not recipients):
+            raise HTTPException(
+                status_code=422,
+                detail="A bot token and at least one chat ID are required to enable Telegram",
+            )
+        configuration = {"bot_token": secret, "recipients": recipients}
+    else:
+        smtp_host = values.get("smtp_host", configuration.get("smtp_host"))
+        smtp_port = values.get("smtp_port", configuration.get("smtp_port", 587))
+        smtp_username = configuration.get("smtp_username")
+        if values.get("smtp_username"):
+            smtp_username = values["smtp_username"]
+        if payload.clear_smtp_username:
+            smtp_username = None
+        smtp_from_email = values.get(
+            "smtp_from_email",
+            configuration.get("smtp_from_email"),
+        )
+        smtp_use_tls = values.get("smtp_use_tls", configuration.get("smtp_use_tls", True))
+        if smtp_from_email and not _valid_email(smtp_from_email):
+            raise HTTPException(status_code=422, detail="Enter a valid sender email address")
+        if any(not _valid_email(recipient) for recipient in recipients):
+            raise HTTPException(status_code=422, detail="Enter valid email addresses")
+        if enabled:
+            if not smtp_host or not smtp_from_email or not recipients:
+                raise HTTPException(
+                    status_code=422,
+                    detail="SMTP host, sender address, and at least one recipient are required",
+                )
+            if smtp_username and not secret:
+                raise HTTPException(
+                    status_code=422,
+                    detail="An SMTP password is required when a username is configured",
+                )
+        configuration = {
+            "smtp_host": smtp_host,
+            "smtp_port": smtp_port,
+            "smtp_username": smtp_username,
+            "smtp_password": secret,
+            "smtp_from_email": smtp_from_email,
+            "smtp_use_tls": smtp_use_tls,
+            "recipients": recipients,
+        }
+
+    encrypted_configuration = encrypt_configuration(configuration, encryption_key)
+    is_new_integration = integration is None
+    if is_new_integration:
+        integration = NotificationIntegration(
+            channel=channel,
+            enabled=enabled,
+            encrypted_configuration=encrypted_configuration,
+            updated_by_administrator_id=current[0].id,
+        )
+        session.add(integration)
+    else:
+        integration.enabled = enabled
+        integration.encrypted_configuration = encrypted_configuration
+        integration.updated_by_administrator_id = current[0].id
+    session.flush()
+    changed_fields = {
+        field
+        for field in fields
+        if field not in {"secret", "clear_secret", "clear_smtp_username"}
+    }
+    if payload.secret or payload.clear_secret:
+        changed_fields.add("credential")
+    if payload.clear_smtp_username:
+        changed_fields.add("smtp_username")
+    _record_management_audit(
+        session,
+        current[0],
+        action=(
+            "notification_integration.created"
+            if is_new_integration
+            else "notification_integration.updated"
+        ),
+        entity_type="notification_integration",
+        entity_id=integration.id,
+        safe_metadata={
+            "channel": channel,
+            "enabled": enabled,
+            "changed_fields": sorted(changed_fields),
+        },
+    )
+    session.commit()
+    return _integration_summary(channel, integration, configuration)
+
+
+@router.post(
+    "/integrations/{channel}/test",
+    response_model=IntegrationTestResponse,
+    dependencies=[Depends(require_role("ADMIN")), Depends(require_csrf)],
+)
+def test_notification_integration(
+    channel: str,
+    request: Request,
+    session: DatabaseSession,
+    current: Annotated[
+        tuple[Administrator, AdministratorSession],
+        Depends(get_current_session),
+    ],
+) -> IntegrationTestResponse:
+    """Send a test message to the first saved recipient without exposing errors."""
+    channel = channel.upper()
+    if channel not in _NOTIFICATION_CHANNELS:
+        raise HTTPException(status_code=404, detail="Notification channel not found")
+    encryption_key = _integration_key(request)
+    try:
+        integration, configuration = get_integration_configuration(
+            session,
+            channel,
+            encryption_key,
+        )
+    except NotificationConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Integration settings cannot be decrypted; check the encryption key",
+        ) from error
+    if integration is None or configuration is None:
+        raise HTTPException(status_code=404, detail="Integration is not configured")
+    recipients = configuration.get("recipients", [])
+    if not recipients:
+        raise HTTPException(status_code=422, detail="Add a recipient before testing")
+    if channel == "TELEGRAM":
+        provider = TelegramNotificationProvider(
+            bot_token=configuration.get("bot_token"),
+        )
+    else:
+        provider = SMTPEmailProvider(
+            host=configuration.get("smtp_host"),
+            port=configuration.get("smtp_port", 587),
+            username=configuration.get("smtp_username"),
+            password=configuration.get("smtp_password"),
+            from_email=configuration.get("smtp_from_email"),
+            use_tls=configuration.get("smtp_use_tls", True),
+        )
+    try:
+        provider.send(
+            message="Test notification from the Visa Appointment Monitoring System.",
+            recipient=str(recipients[0]),
+        )
+    except Exception as error:
+        _record_management_audit(
+            session,
+            current[0],
+            action="notification_integration.tested",
+            entity_type="notification_integration",
+            entity_id=integration.id,
+            safe_metadata={"channel": channel, "succeeded": False},
+        )
+        session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Test delivery failed; check the integration settings and provider status",
+        ) from error
+    _record_management_audit(
+        session,
+        current[0],
+        action="notification_integration.tested",
+        entity_type="notification_integration",
+        entity_id=integration.id,
+        safe_metadata={"channel": channel, "succeeded": True},
+    )
+    session.commit()
+    return IntegrationTestResponse(status="sent", channel=channel)
+
+
 @router.get("/alerts", response_model=list[AlertSummary], dependencies=[Depends(require_dashboard_access)])
 def list_alerts(session: DatabaseSession) -> list[AlertSummary]:
     """List availability alerts for staff review."""
@@ -1063,6 +1453,7 @@ def record_manual_verification(
     session: DatabaseSession,
     job_id: int,
     payload: ManualVerificationRequest,
+    request: Request,
     current: Annotated[
         tuple[Administrator, AdministratorSession],
         Depends(get_current_session),
@@ -1081,6 +1472,10 @@ def record_manual_verification(
         official_source_url=payload.official_source_url,
         internal_notes=payload.internal_notes,
         manual_alert_enabled=payload.manual_alert_enabled,
+        notification_recipients=load_notification_recipients(
+            session,
+            _integration_key(request),
+        ),
     )
     if history is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Manual verification was not recorded")

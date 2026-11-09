@@ -131,6 +131,10 @@ Do not collect unnecessary applicant passport details, dates of birth, travel do
 Protect administrator accounts and notification credentials.
 
 Use encryption in transit and appropriate protection at rest.
+Dashboard-managed Telegram and SMTP credentials must be authenticated-
+encrypted before database storage. Keep the encryption key outside the
+database, share it only with the web and scheduler processes, and never include
+credential values in API responses, logs, test-send errors, or audit metadata.
 
 ## 11. Manual Verification
 
@@ -152,6 +156,8 @@ Record:
 - Administrator-created staff accounts and monitoring-job configuration
   changes, without storing passwords or secrets in audit metadata.
 - Provider permission-review creation, edits, approval, and revocation.
+- Notification integration creation/updates and test-send outcomes, without
+  credential values.
 - Monitoring job changes.
 - Access-mode changes.
 - Manual status updates.

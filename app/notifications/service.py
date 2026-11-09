@@ -79,13 +79,17 @@ class NotificationOutboxService:
         session: Session,
         *,
         providers: dict[str, object] | None = None,
+        channels: Iterable[str] | None = None,
         now: datetime | None = None,
     ) -> list[NotificationOutboxItem]:
         """Deliver pending outbox items using the configured channel providers."""
         providers = providers or {}
+        channels = list(channels) if channels is not None else None
+        if channels is not None and not channels:
+            return []
         now = now or datetime.now(UTC)
         cutoff = now
-        pending = session.execute(
+        query = (
             select(NotificationOutboxItem)
             .where(NotificationOutboxItem.state == "PENDING")
             .where(
@@ -93,7 +97,10 @@ class NotificationOutboxService:
                 | (NotificationOutboxItem.next_attempt_at <= cutoff)
             )
             .order_by(NotificationOutboxItem.created_at.asc())
-        ).scalars().all()
+        )
+        if channels is not None:
+            query = query.where(NotificationOutboxItem.channel.in_(channels))
+        pending = session.execute(query).scalars().all()
 
         processed: list[NotificationOutboxItem] = []
         for item in pending:

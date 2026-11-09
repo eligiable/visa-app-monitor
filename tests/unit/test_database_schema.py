@@ -83,6 +83,7 @@ def test_schema_creates_all_entities(database_session: Session) -> None:
         "audit_events",
         "alert_events",
         "notification_outbox_items",
+        "notification_integrations",
         "notification_delivery_attempts",
         "system_errors",
     }

@@ -549,6 +549,25 @@ class NotificationOutboxItem(Base):
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
 
 
+class NotificationIntegration(TimestampMixin, Base):
+    __tablename__ = "notification_integrations"
+    __table_args__ = (
+        CheckConstraint(
+            "channel IN ('TELEGRAM', 'EMAIL')",
+            name="channel",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel: Mapped[str] = mapped_column(String(16), nullable=False, unique=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    encrypted_configuration: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_by_administrator_id: Mapped[int] = mapped_column(
+        ForeignKey("administrators.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+
+
 class NotificationDeliveryAttempt(Base):
     __tablename__ = "notification_delivery_attempts"
     __table_args__ = (

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -14,6 +15,7 @@ from app.database.models import (
     ManualVerification,
     MonitoringJob,
 )
+from app.notifications.service import NotificationOutboxService
 
 
 class AvailabilityDetectionService:
@@ -31,6 +33,7 @@ class AvailabilityDetectionService:
         check_result_id: int,
         *,
         now: datetime | None = None,
+        notification_recipients: dict[str, Iterable[str]] | None = None,
     ) -> AvailabilityHistory | None:
         """Persist availability history and alert events for a successful check."""
         result = session.get(CheckResult, check_result_id)
@@ -64,11 +67,17 @@ class AvailabilityDetectionService:
         job.last_check_at = now or datetime.now(UTC)
 
         if status == "AVAILABLE":
-            self._emit_available_alert(
+            alert = self._emit_available_alert(
                 session,
                 job=job,
                 availability_history_id=history.id,
                 verification_source="AUTOMATED",
+                now=now or datetime.now(UTC),
+            )
+            self._queue_alert_notifications(
+                session,
+                alert,
+                notification_recipients,
                 now=now or datetime.now(UTC),
             )
 
@@ -85,6 +94,7 @@ class AvailabilityDetectionService:
         internal_notes: str | None = None,
         verified_at: datetime | None = None,
         manual_alert_enabled: bool = False,
+        notification_recipients: dict[str, Iterable[str]] | None = None,
     ) -> AvailabilityHistory | None:
         """Persist a manual verification and alert when enabled by policy."""
         if recorded_status not in {"AVAILABLE", "UNAVAILABLE"}:
@@ -123,11 +133,17 @@ class AvailabilityDetectionService:
         job.last_check_at = verification.verified_at
 
         if recorded_status == "AVAILABLE" and manual_alert_enabled:
-            self._emit_available_alert(
+            alert = self._emit_available_alert(
                 session,
                 job=job,
                 availability_history_id=history.id,
                 verification_source="MANUAL",
+                now=verification.verified_at,
+            )
+            self._queue_alert_notifications(
+                session,
+                alert,
+                notification_recipients,
                 now=verification.verified_at,
             )
 
@@ -174,6 +190,24 @@ class AvailabilityDetectionService:
         session.add(alert)
         session.flush()
         return alert
+
+    @staticmethod
+    def _queue_alert_notifications(
+        session: Session,
+        alert: AlertEvent | None,
+        recipients: dict[str, Iterable[str]] | None,
+        *,
+        now: datetime,
+    ) -> None:
+        """Queue channel deliveries only for an alert that passed policy."""
+        if alert is not None and recipients:
+            NotificationOutboxService().queue_alert_notifications(
+                session,
+                alert.id,
+                recipients=recipients,
+                channels=recipients.keys(),
+                now=now,
+            )
 
     def _alert_in_cooldown(
         self,

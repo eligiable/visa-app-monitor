@@ -279,6 +279,14 @@ Fields:
 Do not store raw passwords, session secrets or notification credentials in
 these records.
 
+Telegram and SMTP credentials are stored only as authenticated-encrypted
+payloads in `NotificationIntegration`. The Fernet master key is supplied via
+`INTEGRATION_ENCRYPTION_KEY` to both web and scheduler processes and must be
+backed up outside the database. The admin API returns configuration status and
+non-secret fields only. Key loss or replacement makes existing payloads
+unreadable; key rotation requires decrypting and re-encrypting each record
+under a controlled procedure.
+
 Authentication uses Argon2id password hashes and opaque, random session
 tokens. Store only session-token and session-bound CSRF-token hashes.
 State-changing browser requests require a matching Origin and CSRF header.
@@ -422,6 +430,18 @@ Fields:
 - `next_attempt_at`
 - `state`
 
+### NotificationIntegration
+
+Fields:
+
+- `id`
+- `channel`
+- `enabled`
+- `encrypted_configuration`
+- `updated_by_administrator_id`
+- `created_at`
+- `updated_at`
+
 ### NotificationDeliveryAttempt
 
 Fields:
@@ -437,6 +457,12 @@ Fields:
 Keep the logical alert separate from channel- and recipient-specific delivery
 attempts. Retries must be bounded and idempotent; record each attempt
 independently.
+
+Only alerts created by verified availability transitions or explicitly
+enabled manual verification are eligible for notification. The worker queues
+configured recipients and processes enabled channels from the durable outbox.
+Disabling a channel pauses its pending items. Channel failures remain isolated
+from other channels, and provider error details must never contain credentials.
 
 All reference and configuration entities use soft-disable fields where
 applicable. Foreign-key deletion is restricted, including for audit and
@@ -736,6 +762,8 @@ Use database records as the authoritative source for all runtime-managed
 configuration, including jobs and provider access settings. Seed/import
 operations must be idempotent and must not silently overwrite database edits.
 Secrets belong in environment variables or a cloud secret manager, not YAML.
+The notification encryption key is external to the database; only encrypted
+Telegram/SMTP credentials and non-secret settings are stored in the database.
 
 Validate configuration using Pydantic.
 

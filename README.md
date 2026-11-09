@@ -70,7 +70,17 @@ openssl rand -hex 32
 ```
 
 Edit `.env` and set `POSTGRES_PASSWORD` and `SESSION_SECURITY_KEY` to
-independently generated random values. Keep `.env` private and never commit it.
+independently generated random values. Generate an integration encryption key
+with:
+
+```bash
+openssl rand -base64 32
+```
+
+Set `INTEGRATION_ENCRYPTION_KEY` in `.env` to the generated value. Keep `.env`
+private and never commit it. The same key must be available to the web and
+scheduler services. Back it up in a secret manager; changing or losing it makes
+saved Telegram and SMTP credentials unreadable.
 
 The project branding uses `eligiable`; the package name and CLI commands use
 `visa-app-monitor`. When
@@ -136,8 +146,24 @@ internet.
 
 The dashboard provides an overview, monitoring jobs and availability history,
 provider status, alerts, notification deliveries, system errors, and a
-manual-verification workflow. Sign-in requires an existing `ADMIN` or `STAFF`
-account; public registration is disabled.
+manual-verification workflow. Administrators can configure Telegram Bot API
+and SMTP integrations in **Integrations**; credentials are encrypted before
+database storage and masked after saving. Sign-in requires an existing `ADMIN`
+or `STAFF` account; public registration is disabled.
+
+### Notification integrations
+
+Configure the encryption key before saving credentials. Telegram uses a bot
+token and one or more chat IDs. Email uses an SMTP host, port, optional
+username/password, sender address, TLS setting, and recipient addresses. The
+test action sends a test message to the first configured recipient. Blank
+secret fields preserve the saved token or password; use the explicit remove
+checkbox to clear one. Settings changes and test-send outcomes are audited
+without storing credentials in audit metadata.
+
+Only alert events created after a configured integration is enabled are queued
+for delivery. The worker dispatches due outbox items and records each attempt.
+Disabling a channel pauses its pending deliveries until it is enabled again.
 
 ### Staff and monitoring-job administration
 
@@ -242,6 +268,7 @@ export SESSION_SECURITY_KEY="$(openssl rand -hex 32)"
 export PUBLIC_ORIGIN='http://localhost:8000'
 export SESSION_COOKIE_NAME='eligiable_session'
 export SESSION_COOKIE_SECURE='false'
+export INTEGRATION_ENCRYPTION_KEY="$(openssl rand -base64 32 | tr -d '\n')"
 ```
 
 Apply migrations, load reference data, provision an administrator, and start

@@ -26,8 +26,18 @@ def main() -> None:
         engine=MonitoringEngine(
             registry=create_default_registry(),
             owner=owner,
+            notification_encryption_key=(
+                settings.integration_encryption_key.get_secret_value()
+                if settings.integration_encryption_key
+                else None
+            ),
         ),
         session_factory=create_session_factory(database_engine),
+        notification_encryption_key=(
+            settings.integration_encryption_key.get_secret_value()
+            if settings.integration_encryption_key
+            else None
+        ),
     )
 
     async def run() -> None:

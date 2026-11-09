@@ -40,7 +40,9 @@ services:
 
   web:
     build: .
-    environment: *app_environment
+    environment:
+      <<: *app_environment
+      INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -70,7 +72,9 @@ services:
   scheduler:
     build: .
     command: ["visa-app-monitor-worker"]
-    environment: *app_environment
+    environment:
+      <<: *app_environment
+      INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

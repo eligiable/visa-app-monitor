@@ -9,6 +9,7 @@ description = "Compliant visa appointment monitoring and staff notification syst
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.13,<2.0",
+    "cryptography>=42,<47",
     "fastapi>=0.115,<1.0",
     "pydantic>=2.7,<3.0",
     "pydantic-settings>=2.4,<3.0",

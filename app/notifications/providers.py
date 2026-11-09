@@ -20,21 +20,29 @@ class TelegramNotificationProvider:
     def send(self, *, message: str, recipient: str) -> str:
         """Send a message to a Telegram chat ID."""
         if not self.bot_token:
-            raise ValueError("TELEGRAM_BOT_TOKEN is not configured")
+            raise ValueError("Telegram bot token is not configured")
 
-        response = httpx.post(
-            f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
-            json={
-                "chat_id": recipient,
-                "text": message,
-                "disable_web_page_preview": True,
-            },
-            timeout=self.timeout,
-        )
+        try:
+            response = httpx.post(
+                f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
+                json={
+                    "chat_id": recipient,
+                    "text": message,
+                    "disable_web_page_preview": True,
+                },
+                timeout=self.timeout,
+            )
+        except httpx.RequestError:
+            raise RuntimeError("Telegram API request failed") from None
         if response.status_code >= 400:
-            raise RuntimeError(f"Telegram API failure: {response.text[:500]}")
+            raise RuntimeError(
+                f"Telegram API failure (HTTP {response.status_code})",
+            )
 
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError:
+            raise RuntimeError("Telegram API returned an invalid response") from None
         result = payload.get("result", {}) if isinstance(payload, dict) else {}
         message_id = result.get("message_id")
         if message_id is None:

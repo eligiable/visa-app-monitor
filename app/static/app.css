@@ -133,6 +133,21 @@ tbody tr:hover { background: #fcfcfe; }
 .provider-review-actions-right { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .button-danger { min-height: 40px; padding: 0 14px; border: 1px solid #f1c3c8; border-radius: 9px; background: #fff3f4; color: #a42e40; font-weight: 700; }
 .button-danger:hover { background: #ffe8eb; }
+.integration-key-notice { margin-bottom: 18px; padding: 16px 18px; border: 1px solid #dfe5ec; border-left: 4px solid var(--blue); background: white; color: #3a465e; font-size: 12px; line-height: 1.55; }
+.integration-key-notice strong { display: block; margin-bottom: 5px; font-size: 13px; }
+.integration-key-notice p { margin: 0 0 5px; }
+.integration-key-notice code { padding: 2px 4px; background: #f0f3f8; color: var(--ink); }
+.integration-key-status { color: var(--green); font-weight: 700; }
+.integration-key-status.is-error { color: var(--red); }
+.integration-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+.integration-panel { min-width: 0; }
+.integration-panel .panel-heading { min-height: 68px; }
+.integration-form { padding: 8px 20px 20px; }
+.integration-form > label:not(.checkbox-label) { margin-top: 16px; }
+.integration-form .checkbox-label { margin-top: 13px; }
+.integration-form .field-with-help { margin-top: 16px; }
+.integration-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+.integration-actions button:disabled { cursor: progress; opacity: .65; }
 
 @media (max-width: 980px) {
   .sidebar { width: 218px; }
@@ -175,4 +190,7 @@ tbody tr:hover { background: #fcfcfe; }
   .provider-review-actions { align-items: stretch; flex-direction: column-reverse; }
   .provider-review-actions-right { justify-content: stretch; }
   .provider-review-actions-right .button { flex: 1 1 auto; padding: 0 9px; font-size: 11px; }
+  .integration-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .integration-key-notice { padding: 13px; }
+  .integration-form { padding: 6px 14px 15px; }
 }

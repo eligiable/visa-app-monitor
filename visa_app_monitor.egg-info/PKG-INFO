@@ -4,6 +4,7 @@ Version: 0.1.0
 Summary: Compliant visa appointment monitoring and staff notification system
 Requires-Python: >=3.12
 Requires-Dist: alembic<2.0,>=1.13
+Requires-Dist: cryptography<47,>=42
 Requires-Dist: fastapi<1.0,>=0.115
 Requires-Dist: pydantic<3.0,>=2.7
 Requires-Dist: pydantic-settings<3.0,>=2.4
