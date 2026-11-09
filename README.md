@@ -87,7 +87,8 @@ below.
 Load the initial reference data:
 
 ```bash
-docker-compose run --rm web srm-seed-reference-data
+docker-compose run --rm web srm-seed-reference-data \
+  --file /app/configs/seed.yaml
 ```
 
 After seeding completes successfully, create an administrator:
