@@ -76,6 +76,14 @@ Start the database, apply migrations, and launch the web app:
 docker compose up --build -d
 ```
 
+If `docker compose` is unavailable but `docker-compose` is installed, use
+`docker-compose` in place of `docker compose` in the commands below. For
+example:
+
+```bash
+docker-compose up --build -d
+```
+
 Load initial reference data and create an administrator:
 
 ```bash
